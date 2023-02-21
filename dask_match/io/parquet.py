@@ -37,7 +37,7 @@ class ReadParquet(IO):
         "aggregate_files",
         "parquet_file_extension",
         "filesystem",
-        "kwargs",
+        #"kwargs",
     ]
     _defaults = {
         "columns": None,
@@ -55,7 +55,7 @@ class ReadParquet(IO):
         "aggregate_files": None,
         "parquet_file_extension": (".parq", ".parquet", ".pq"),
         "filesystem": None,
-        "kwargs": {},
+        #"kwargs": {},
     }
 
     @cached_property
@@ -73,21 +73,23 @@ class ReadParquet(IO):
         if hasattr(self.path, "name"):
             self.path = stringify_path(self.path)
 
+        kwargs = {}
         # Process and split user options
         (
             dataset_options,
             read_options,
             open_file_options,
             other_options,
-        ) = _split_user_options(**self.kwargs)
+        ) = _split_user_options(**kwargs)
 
         # Extract global filesystem and paths
+        so = {} if self.storage_options is None else self.storage_options.options
         fs, paths, dataset_options, open_file_options = self.engine.extract_filesystem(
             self.path,
             self.filesystem,
             dataset_options,
             open_file_options,
-            self.storage_options,
+            {k: v for k, v in so.items()},
         )
         read_options["open_file_options"] = open_file_options
         paths = sorted(paths, key=natural_sort_key)  # numeric rather than glob ordering

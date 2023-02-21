@@ -315,10 +315,22 @@ class IO(API):
     pass
 
 
-def ReadParquet(*args, **kwargs):
+def ReadParquet(*args, storage_options=None, **kwargs):
     from dask_match.io.parquet import ReadParquet
 
-    return ReadParquet(*args, **kwargs)
+    class Options:
+
+        def __init__(self, **options):
+            self.options = options
+
+        def __hash__(self):
+            return hash(tokenize(self.options))
+
+    return ReadParquet(
+        *args,
+        storage_options=Options(**storage_options) if storage_options else None,
+        **kwargs,
+    )
 
 
 class ReadCSV(IO):

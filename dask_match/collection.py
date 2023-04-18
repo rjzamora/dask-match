@@ -190,6 +190,36 @@ class DataFrame(FrameBase):
             result = new_collection(expr.Assign(result.expr, k, v.expr))
         return result
 
+    def merge(
+        self,
+        other,
+        how="inner",
+        on=None,
+        left_on=None,
+        right_on=None,
+        left_index=False,
+        right_index=False,
+        suffixes=("_x", "_y"),
+        indicator=False,
+    ):
+        if isinstance(other, DataFrame):
+            other = other.expr
+        assert is_dataframe_like(other)
+        return new_collection(
+            expr.Merge(
+                self.expr,
+                other,
+                how=how,
+                on=on,
+                left_on=left_on,
+                right_on=right_on,
+                left_index=left_index,
+                right_index=right_index,
+                suffixes=suffixes,
+                indicator=indicator,
+            )
+        )
+
     def __setitem__(self, key, value):
         out = self.assign(**{key: value})
         self._expr = out._expr

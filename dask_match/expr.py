@@ -1111,5 +1111,57 @@ class Fused(Blockwise):
         return dask.core.get(graph, name)
 
 
+class Merge(Expr):
+
+    _parameters = [
+        "left",
+        "right",
+        "how",
+        "on",
+        "left_on",
+        "right_on",
+        "left_index",
+        "right_index",
+        "suffixes",
+        "indicator",
+    ]
+
+    def __str__(self):
+        return f"Shuffle({self._name[-7:]})"
+
+    # def simplify(self):
+    #     # Use `backend` to decide how to compose a
+    #     # shuffle operation from concerete expressions
+    #     backend = self.backend or "simple"
+    #     if isinstance(backend, ShuffleBackend):
+    #         lower = backend.from_abstract_shuffle
+    #     elif backend == "simple":
+    #         # Only support "SimpleShuffle" for now
+    #         lower = SimpleShuffle.from_abstract_shuffle
+    #     else:
+    #         raise ValueError(f"{backend} not supported")
+    #     return lower(self)
+
+    def _layer(self):
+        raise NotImplementedError(
+            f"{self} is abstract! Please call `simplify`"
+            f"before generating a task graph."
+        )
+
+    @functools.cached_property
+    def _meta(self):
+        kwargs = {k: self.operands[i] for i, k in enumerate(self._parameters[2:])}
+        if isinstance(self.left, Expr):
+            right = self.right._meta
+        else:
+            right = self.right
+        return self.left._meta.merge(right, **kwargs)
+
+    def _divisions(self):
+        return (None,) * (self.left.npartitions + 1)
+
+class BlockwiseMerge(Merge, Blockwise):
+
+
 from dask_match.io import BlockwiseIO
 from dask_match.reductions import Count, Max, Min, Mode, Size, Sum

@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from matchpy import CustomConstraint, Pattern, ReplacementRule, Wildcard
 
+from dask.utils import random_state_data
+
 from dask_match.collection import new_collection
 from dask_match.expr import Projection
 from dask_match.io import BlockwiseIO
@@ -20,7 +22,7 @@ class Timeseries(BlockwiseIO):
         "partition_freq",
         "seed",
         "kwargs",
-        "_take_partitions",
+        "_partitions",
     ]
     _defaults = {
         "start": "2000-01-01",
@@ -30,16 +32,18 @@ class Timeseries(BlockwiseIO):
         "partition_freq": "1d",
         "seed": None,
         "kwargs": {},
-        "_take_partitions": None,
+        "_partitions": None,
     }
 
     @property
     def _meta(self):
         dtypes = self.operand("dtypes")
+        states = [0] * len(dtypes)
         return make_timeseries_part(
-            "2000", "2000", dtypes, list(dtypes.keys()), "1H", 0, self.kwargs
+            "2000", "2000", dtypes, list(dtypes.keys()), "1H", states, self.kwargs
         )
 
+    @functools.lru_cache
     def _divisions(self):
         return list(
             pd.date_range(start=self.start, end=self.end, freq=self.partition_freq)
@@ -47,25 +51,25 @@ class Timeseries(BlockwiseIO):
 
     @functools.cached_property
     def random_state(self):
-        size = (
-            len(pd.date_range(start=self.start, end=self.end, freq=self.partition_freq))
-            + 1
-        )
-        return np.random.randint(2e9, size=size)
+        npartitions = len(self._divisions()) - 1
+        size = npartitions * len(self.dtypes)
+        if self.seed is None:
+            return np.random.randint(2e9, size=size)
+        else:
+            return random_state_data(size, self.seed)
 
     def _task(self, index):
-        original_index = index
-        if self._take_partitions is not None:
-            # Need original index for random_state
-            original_index = self._take_partitions[index]
+        num_columns = len(self.columns)
+        offset = index * num_columns
+        full_divisions = self._divisions()
         return (
             make_timeseries_part,
-            self.divisions[index],
-            self.divisions[index + 1],
+            full_divisions[index],
+            full_divisions[index + 1],
             self.operand("dtypes"),
             self.columns,
             self.freq,
-            self.random_state[original_index],
+            self.random_state[offset : offset + num_columns],
             self.kwargs,
         )
 
@@ -80,10 +84,6 @@ class Timeseries(BlockwiseIO):
         def optimize_timeseries_projection(
             start, end, dtypes, freq, partition_freq, seed, kwargs, columns
         ):
-            # TODO: This isn't quite kosher.
-            # The seed will produce different values now that dtypes are
-            # different.
-            # We maybe need to have a different seed per column.
             if isinstance(columns, (list, pd.Index)):
                 dtypes = {col: dtypes[col] for col in columns}
                 return Timeseries(
@@ -169,9 +169,9 @@ make = {
 
 def make_timeseries_part(start, end, dtypes, columns, freq, state_data, kwargs):
     index = pd.date_range(start=start, end=end, freq=freq, name="timestamp")
-    state = np.random.RandomState(state_data)
     data = {}
-    for k, dt in dtypes.items():
+    for i, (k, dt) in enumerate(dtypes.items()):
+        state = np.random.RandomState(state_data[i])
         kws = {
             kk.rsplit("_", 1)[1]: v
             for kk, v in kwargs.items()

@@ -1,7 +1,7 @@
 from dask.dataframe.utils import assert_eq
 
 from dask_match.datasets import timeseries
-from dask_match.utils import _check_take_partitions
+from dask_match.utils import _check_culling
 
 
 def test_timeseries():
@@ -20,6 +20,13 @@ def test_optimization():
     assert expected._name == result._name
 
 
+def test_column_projection_deterministic():
+    df = timeseries(freq="1H", start="2000-01-01", end="2000-01-02", seed=123)
+    result_id = df[["id"]].optimize()
+    result_id_x = df[["id", "x"]].optimize()
+    assert_eq(result_id["id"], result_id_x["id"])
+
+
 def test_timeseries_culling():
     df = timeseries(dtypes={"x": int, "y": float}, seed=123)
     pdf = df.compute()
@@ -31,10 +38,9 @@ def test_timeseries_culling():
     assert df2.npartitions == 1
     assert len(df2.dask) == df2.npartitions
     expected = pdf.iloc[offset : 2 * offset][["x"]] + 1
-    # TODO: Compare values in "x" after #41
-    assert_eq(df2.index, expected.index)
+    assert_eq(df2, expected)
 
     # Check that we still get culling without fusion
     df3 = df.optimize(fuse=False)
-    _check_take_partitions(df3.expr, [1])
-    assert_eq(df2.index, expected.index)
+    _check_culling(df3.expr, [1])
+    assert_eq(df2, expected)

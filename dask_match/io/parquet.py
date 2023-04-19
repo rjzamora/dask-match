@@ -47,7 +47,7 @@ class ReadParquet(BlockwiseIO):
         "parquet_file_extension",
         "filesystem",
         "kwargs",
-        "_take_partitions",
+        "_partitions",
     ]
     _defaults = {
         "columns": None,
@@ -64,7 +64,7 @@ class ReadParquet(BlockwiseIO):
         "parquet_file_extension": (".parq", ".parquet", ".pq"),
         "filesystem": "fsspec",
         "kwargs": None,
-        "_take_partitions": None,
+        "_partitions": None,
     }
 
     @property
@@ -291,6 +291,4 @@ class ReadParquet(BlockwiseIO):
         return self._plan["divisions"]
 
     def _task(self, index: int):
-        if self._take_partitions is not None:
-            index = self._take_partitions[index]
         return (self._plan["func"], self._plan["parts"][index])

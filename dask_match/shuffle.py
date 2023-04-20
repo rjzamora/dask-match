@@ -56,6 +56,8 @@ class Shuffle(Expr):
             lower = SimpleShuffle.from_abstract_shuffle
         elif backend == "tasks":
             lower = TaskShuffle.from_abstract_shuffle
+        elif backend == "p2p":
+            lower = P2PShuffle.from_abstract_shuffle
         else:
             # Only support task-based shuffling for now
             raise ValueError(f"{backend} not supported")
@@ -321,6 +323,45 @@ class TaskShuffle(SimpleShuffle):
                 )
 
             dsk.update(dsk2)
+        return dsk
+
+
+class P2PShuffle(SimpleShuffle):
+    """P2P shuffle implementation"""
+
+    lazy_hash_support = False
+
+    def _layer(self):
+        from distributed.shuffle._shuffle import (
+            barrier_key,
+            shuffle_barrier,
+            shuffle_transfer,
+            shuffle_unpack,
+            ShuffleId,
+        )
+
+        dsk = {}
+        token = self._name.split("-")[-1]
+        _barrier_key = barrier_key(ShuffleId(token))
+        name = "shuffle-transfer-" + token
+        transfer_keys = list()
+        for i in range(self.frame.npartitions):
+            transfer_keys.append((name, i))
+            dsk[(name, i)] = (
+                shuffle_transfer,
+                (self.frame._name, i),
+                token,
+                i,
+                self.npartitions_out,
+                self.partitioning_index,
+            )
+
+        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
+
+        name = self._name
+        parts_out = range(self.npartitions_out)
+        for part_out in parts_out:
+            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, _barrier_key)
         return dsk
 
 

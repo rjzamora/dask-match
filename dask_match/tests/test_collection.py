@@ -312,6 +312,19 @@ def test_task_shuffle_index(npartitions, max_branch):
     assert sorted(unique) == list(range(20))
 
 
+def test_task_shuffle_p2p():
+    from distributed import Client, LocalCluster
+
+    pdf = pd.DataFrame({"x": list(range(20)) * 5, "y": range(100)}).set_index("x")
+    df = from_pandas(pdf, npartitions=10)
+    df2 = df.shuffle("x", backend="p2p")
+
+    with Client(LocalCluster(n_workers=2)) as client:
+        df2.compute()
+        # Check the computed (re-ordered) result
+        #assert_eq(df, df2)
+
+
 def test_column_getattr(df):
     df = df.expr
     assert df.x._name == df["x"]._name

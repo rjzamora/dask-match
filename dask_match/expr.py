@@ -17,7 +17,7 @@ from dask.dataframe.core import (
     apply_and_enforce,
     is_dataframe_like,
 )
-from dask.utils import M, apply, funcname
+from dask.utils import M, apply, funcname, import_required
 from matchpy import Arity, Operation, ReplacementRule, replace_all
 from matchpy.expressions.expressions import _OperationMeta
 
@@ -492,6 +492,155 @@ class Expr(Operation, metaclass=_ExprMeta):
         if update:  # Only recreate if something changed
             return type(self)(*new)
         return self
+
+
+    def _to_graphviz(
+        self,
+        data_attributes=None,
+        function_attributes=None,
+        rankdir="BT",
+        graph_attr=None,
+        node_attr=None,
+        edge_attr=None,
+        **kwargs,
+    ):
+        from dask.dot import label, name
+
+        graphviz = import_required(
+            "graphviz",
+            "Drawing dask graphs with the graphviz visualization engine requires the `graphviz` "
+            "python library and the `graphviz` system library.\n\n"
+            "Please either conda or pip install as follows:\n\n"
+            "  conda install python-graphviz     # either conda install\n"
+            "  python -m pip install graphviz    # or pip install and follow installation instructions",
+        )
+
+        data_attributes = data_attributes or {}
+        function_attributes = function_attributes or {}
+        graph_attr = graph_attr or {}
+        node_attr = node_attr or {}
+        edge_attr = edge_attr or {}
+
+        graph_attr["rankdir"] = rankdir
+        node_attr["shape"] = "box"
+        node_attr["fontname"] = "helvetica"
+
+        graph_attr.update(kwargs)
+        g = graphviz.Digraph(
+            graph_attr=graph_attr, node_attr=node_attr, edge_attr=edge_attr
+        )
+
+        # n_tasks = {}
+        # for layer in hg.dependencies:
+        #     n_tasks[layer] = len(hg.layers[layer])
+
+        # min_tasks = min(n_tasks.values())
+        # max_tasks = max(n_tasks.values())
+
+        cache = {}
+
+        color = kwargs.get("color")
+        # if color == "layer_type":
+        #     layer_colors = {
+        #         "DataFrameIOLayer": ["#CCC7F9", False],  # purple
+        #         "ShuffleLayer": ["#F9CCC7", False],  # rose
+        #         "SimpleShuffleLayer": ["#F9CCC7", False],  # rose
+        #         "ArrayOverlayLayer": ["#FFD9F2", False],  # pink
+        #         "BroadcastJoinLayer": ["#D9F2FF", False],  # blue
+        #         "Blockwise": ["#D9FFE6", False],  # green
+        #         "BlockwiseLayer": ["#D9FFE6", False],  # green
+        #         "MaterializedLayer": ["#DBDEE5", False],  # gray
+        #     }
+
+
+        exprs = {}
+        dependencies = {}
+        stack = [self]
+        seen = set()
+        while stack:
+            expr = stack.pop()
+
+            if expr._name in seen:
+                continue
+            seen.add(expr._name)
+
+            exprs[expr._name] = expr
+            dependencies[expr._name] = set([dep._name for dep in self.dependencies()])
+            for operand in expr.operands:
+                if isinstance(operand, Expr):
+                    stack.append(operand)
+
+
+
+        for expr in dependencies:
+            expr_name = name(expr)
+            attrs = data_attributes.get(expr, {})
+
+            node_label = label(expr, cache=cache)
+            node_size = (
+                20
+                #if max_tasks == min_tasks
+                #else int(20 + ((n_tasks[layer] - min_tasks) / (max_tasks - min_tasks)) * 20)
+            )
+
+            # expr_type = str(type(exprs[expr]).__name__)
+            # node_tooltips = (
+            #     f"A {expr_type.replace('Layer', '')} Layer with {n_tasks[layer]} Tasks.\n"
+            # )
+
+            attrs.setdefault("label", str(node_label))
+            attrs.setdefault("fontsize", str(node_size))
+            #attrs.setdefault("tooltip", str(node_tooltips))
+
+            g.node(expr_name, **attrs)
+
+        for expr, deps in dependencies.items():
+            expr_name = name(expr)
+            for dep in deps:
+                dep_name = name(dep)
+                g.edge(dep_name, expr_name)
+
+        return g
+
+
+    def visualize(self, filename="dask-hlg.svg", format=None, **kwargs):
+        """
+        Visualize this dask high level graph.
+        Requires ``graphviz`` to be installed.
+        Parameters
+        ----------
+        filename : str or None, optional
+            The name of the file to write to disk. If the provided `filename`
+            doesn't include an extension, '.png' will be used by default.
+            If `filename` is None, no file will be written, and the graph is
+            rendered in the Jupyter notebook only.
+        format : {'png', 'pdf', 'dot', 'svg', 'jpeg', 'jpg'}, optional
+            Format in which to write output file. Default is 'svg'.
+        color : {None, 'layer_type'}, optional (default: None)
+            Options to color nodes.
+            - None, no colors.
+            - layer_type, color nodes based on the layer type.
+        **kwargs
+           Additional keyword arguments to forward to ``to_graphviz``.
+        Examples
+        --------
+        >>> x.dask.visualize(filename='dask.svg')  # doctest: +SKIP
+        >>> x.dask.visualize(filename='dask.svg', color='layer_type')  # doctest: +SKIP
+        Returns
+        -------
+        result : IPython.diplay.Image, IPython.display.SVG, or None
+            See dask.dot.dot_graph for more information.
+        See Also
+        --------
+        dask.dot.dot_graph
+        dask.base.visualize # low level variant
+        """
+
+        from dask.dot import graphviz_to_file
+
+        g = self._to_graphviz(**kwargs)
+        graphviz_to_file(g, filename, format)
+        return g
 
 
 class Blockwise(Expr):

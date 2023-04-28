@@ -262,6 +262,54 @@ class Expr:
     def _simplify_up(self, parent):
         return
 
+    def lower(self):
+        """Lower abstract expressions
+
+        This leverages the ``._lower`` method defined on each class
+
+        Returns
+        -------
+        expr:
+            output expression
+        changed:
+            whether or not any change occured
+        """
+        expr = self
+
+        while True:
+            # Lower this node
+            out = expr._lower()
+            if out is None:
+                out = expr
+            if not isinstance(out, Expr):
+                return out
+            if out._name != expr._name:
+                expr = out
+                continue
+
+            # Lower all of the children
+            new_operands = []
+            changed = False
+            for operand in expr.operands:
+                if isinstance(operand, Expr):
+                    new = operand.lower()
+                    if new._name != operand._name:
+                        changed = True
+                else:
+                    new = operand
+                new_operands.append(new)
+
+            if changed:
+                expr = type(expr)(*new_operands)
+                continue
+            else:
+                break
+
+        return expr
+
+    def _lower(self):
+        return
+
     def optimize(self, **kwargs):
         return optimize(self, **kwargs)
 
@@ -782,6 +830,8 @@ class Projection(Elemwise):
         return f"{base}[{repr(self.columns)}]"
 
     def _simplify_down(self):
+        from dask_expr.shuffle import Shuffle
+
         if isinstance(self.frame, Projection):
             # df[a][b]
             a = self.frame.operand("columns")
@@ -795,6 +845,28 @@ class Projection(Elemwise):
                 assert b in a
 
             return self.frame.frame[b]
+
+        if isinstance(self.frame, Shuffle):
+            # Move the column projection to come
+            # before the abstract Shuffle
+            projection = self.operand("columns")
+            if isinstance(projection, (str, int)):
+                projection = [projection]
+
+            partitioning_index = self.frame.partitioning_index
+            if isinstance(partitioning_index, (str, int)):
+                partitioning_index = [partitioning_index]
+
+            target = self.frame.frame
+            new_projection = [
+                col
+                for col in target.columns
+                if (col in partitioning_index or col in projection)
+            ]
+            if set(new_projection) < set(target.columns):
+                return type(self.frame)(
+                    target[new_projection], *self.frame.operands[1:]
+                )[self.operand("columns")]
 
 
 class Index(Elemwise):
@@ -831,6 +903,11 @@ class Head(Expr):
     def _task(self, index: int):
         raise NotImplementedError()
 
+    def _lower(self):
+        if not isinstance(self, BlockwiseHead):
+            # Lower to Blockwise
+            return BlockwiseHead(Partitions(self.frame, [0]), self.n)
+
     def _simplify_down(self):
         if isinstance(self.frame, Elemwise):
             operands = [
@@ -838,9 +915,6 @@ class Head(Expr):
                 for op in self.frame.operands
             ]
             return type(self.frame)(*operands)
-        if not isinstance(self, BlockwiseHead):
-            # Lower to Blockwise
-            return BlockwiseHead(Partitions(self.frame, [0]), self.n)
         if isinstance(self.frame, Head):
             return Head(self.frame.frame, min(self.n, self.frame.n))
 
@@ -1076,7 +1150,7 @@ def optimize(expr: Expr, fuse: bool = True) -> Expr:
     simplify
     optimize_blockwise_fusion
     """
-    expr = expr.simplify()
+    expr = expr.simplify().lower().simplify()
 
     if fuse:
         expr = optimize_blockwise_fusion(expr)

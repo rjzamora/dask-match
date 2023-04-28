@@ -25,12 +25,12 @@ class Repartition(Expr):
 
     def _divisions(self):
         if self.n is not None:
-            return self.simplify()._divisions()
+            return self.lower()._divisions()
         return self.new_divisions
 
-    def _simplify_down(self):
+    def _lower(self):
         if type(self) != Repartition:
-            # This simplify logic should not be inherited
+            # This lowering logic should not be inherited
             return None
         if self.n is not None:
             if self.n < self.frame.npartitions:

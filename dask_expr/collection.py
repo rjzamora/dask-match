@@ -80,16 +80,19 @@ class FrameBase(DaskMethodsMixin):
 
     def __dask_graph__(self):
         out = self.expr
-        out = out.simplify()
+        out = out.lower()
         return out.__dask_graph__()
 
     def __dask_keys__(self):
         out = self.expr
-        out = out.simplify()
+        out = out.lower()
         return out.__dask_keys__()
 
     def simplify(self):
         return new_collection(self.expr.simplify())
+
+    def lower(self):
+        return new_collection(self.expr.lower())
 
     @property
     def dask(self):
@@ -99,7 +102,7 @@ class FrameBase(DaskMethodsMixin):
         return _concat, ()
 
     def __dask_postpersist__(self):
-        state = self.simplify()
+        state = self.lower()
         return from_graph, (state._meta, state.divisions, state._name)
 
     def __getattr__(self, key):

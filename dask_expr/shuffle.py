@@ -56,7 +56,7 @@ class Shuffle(Expr):
     def _node_label_args(self):
         return [self.frame, self.partitioning_index]
 
-    def _simplify_down(self):
+    def _lower(self):
         # Use `backend` to decide how to compose a
         # shuffle operation from concerete expressions
         # TODO: Support "p2p"
@@ -112,7 +112,7 @@ class ShuffleBackend(Shuffle):
         """Create an Expr tree that uses this ShuffleBackend class"""
         raise NotImplementedError()
 
-    def _simplify_down(self):
+    def _lower(self):
         return None
 
 

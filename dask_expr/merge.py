@@ -144,8 +144,8 @@ class Merge(Expr):
         # Blockwise merge
         return BlockwiseMerge(left, right, **self.kwargs)
 
-    def _simplify_down(self):
-        if type(self) == Merge:
+    def _simplify_down(self, lower: bool = True):
+        if lower and type(self) == Merge:
             # Only lower abstract objects
             return self._lower()
 

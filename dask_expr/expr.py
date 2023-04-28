@@ -194,7 +194,7 @@ class Expr:
 
         return {(self._name, i): self._task(i) for i in range(self.npartitions)}
 
-    def simplify(self):
+    def simplify(self, lower: bool = True):
         """Simplify expression
 
         This leverages the ``._simplify_down`` method defined on each class
@@ -212,7 +212,7 @@ class Expr:
             _continue = False
 
             # Simplify this node
-            out = expr._simplify_down()
+            out = expr._simplify_down(lower)
             if out is None:
                 out = expr
             if not isinstance(out, Expr):
@@ -241,7 +241,7 @@ class Expr:
             changed = False
             for operand in expr.operands:
                 if isinstance(operand, Expr):
-                    new = operand.simplify()
+                    new = operand.simplify(lower)
                     if new._name != operand._name:
                         changed = True
                 else:
@@ -256,7 +256,7 @@ class Expr:
 
         return expr
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         return
 
     def _simplify_up(self, parent):
@@ -784,7 +784,10 @@ class Projection(Elemwise):
             base = "(" + base + ")"
         return f"{base}[{repr(self.columns)}]"
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
+        from dask_expr.merge import Merge
+        from dask_expr.shuffle import Shuffle
+
         if isinstance(self.frame, Projection):
             # df[a][b]
             a = self.frame.operand("columns")
@@ -798,6 +801,66 @@ class Projection(Elemwise):
                 assert b in a
 
             return self.frame.frame[b]
+
+        if type(self.frame) == Shuffle:
+            # Add a column projection before the Shuffle
+            projection = self.operand("columns")
+            if isinstance(projection, (str, int)):
+                projection = [projection]
+
+            partitioning_index = self.frame.partitioning_index
+            if isinstance(partitioning_index, (str, int)):
+                partitioning_index = [partitioning_index]
+
+            target = self.frame.frame
+            new_projection = [
+                col
+                for col in target.columns
+                if (col in partitioning_index or col in projection)
+            ]
+            if set(new_projection).issubset(target.columns):
+                return type(self.frame)(
+                    target[new_projection], *self.frame.operands[1:]
+                )
+
+        if type(self.frame) == Merge:
+            # Reorder the column projection to
+            # occur before the Merge
+            projection = self.operand("columns")
+            if isinstance(projection, (str, int)):
+                projection = [projection]
+
+            # Find columns to project on the left
+            left = self.frame.left
+            left_on = self.frame.left_on
+            left_suffix = self.frame.suffixes[0]
+            project_left = [
+                col
+                for col in left.columns
+                if (
+                    col in left_on
+                    or col in projection
+                    or f"{col}{left_suffix}" in projection
+                )
+            ]
+
+            # Find columns to project on the right
+            right = self.frame.right
+            right_on = self.frame.right_on
+            right_suffix = self.frame.suffixes[1]
+            project_right = [
+                col
+                for col in right.columns
+                if (
+                    col in right_on
+                    or col in projection
+                    or f"{col}{right_suffix}" in projection
+                )
+            ]
+
+            return type(self.frame)(
+                left[project_left], right[project_right], *self.frame.operands[2:]
+            )
 
 
 class Index(Elemwise):
@@ -834,14 +897,14 @@ class Head(Expr):
     def _task(self, index: int):
         raise NotImplementedError()
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         if isinstance(self.frame, Elemwise):
             operands = [
                 Head(op, self.n) if isinstance(op, Expr) else op
                 for op in self.frame.operands
             ]
             return type(self.frame)(*operands)
-        if not isinstance(self, BlockwiseHead):
+        if not isinstance(self, BlockwiseHead) and lower:
             # Lower to Blockwise
             return BlockwiseHead(Partitions(self.frame, [0]), self.n)
         if isinstance(self.frame, Head):
@@ -890,7 +953,7 @@ class Add(Binop):
     operation = operator.add
     _operator_repr = "+"
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         if (
             isinstance(self.left, Expr)
             and isinstance(self.right, Expr)
@@ -908,7 +971,7 @@ class Mul(Binop):
     operation = operator.mul
     _operator_repr = "*"
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         if (
             isinstance(self.right, Mul)
             and isinstance(self.left, numbers.Number)
@@ -971,7 +1034,7 @@ class Partitions(Expr):
     def _task(self, index: int):
         return (self.frame._name, self.partitions[index])
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         if isinstance(self.frame, Blockwise) and not isinstance(
             self.frame, (BlockwiseIO, Fused)
         ):
@@ -1079,7 +1142,9 @@ def optimize(expr: Expr, fuse: bool = True) -> Expr:
     simplify
     optimize_blockwise_fusion
     """
-    expr = expr.simplify()
+    expr = expr.simplify(lower=False)
+
+    expr = expr.simplify(lower=True)
 
     if fuse:
         expr = optimize_blockwise_fusion(expr)

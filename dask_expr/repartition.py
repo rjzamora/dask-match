@@ -28,8 +28,8 @@ class Repartition(Expr):
             return self.simplify()._divisions()
         return self.new_divisions
 
-    def _simplify_down(self):
-        if type(self) != Repartition:
+    def _simplify_down(self, lower: bool = True):
+        if type(self) != Repartition or not lower:
             # This simplify logic should not be inherited
             return None
         if self.n is not None:

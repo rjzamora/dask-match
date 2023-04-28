@@ -61,23 +61,24 @@ class Shuffle(Expr):
     def _node_label_args(self):
         return [self.frame, self.partitioning_index]
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         # Use `backend` to decide how to compose a
         # shuffle operation from concerete expressions
         # TODO: Support "p2p"
-        backend = self.backend or get_default_shuffle_algorithm()
-        backend = "tasks" if backend == "p2p" else backend
-        if hasattr(backend, "from_abstract_shuffle"):
-            return backend.from_abstract_shuffle(self)
-        elif backend == "disk":
-            return DiskShuffle.from_abstract_shuffle(self)
-        elif backend == "simple":
-            return SimpleShuffle.from_abstract_shuffle(self)
-        elif backend == "tasks":
-            return TaskShuffle.from_abstract_shuffle(self)
-        else:
-            # Only support task-based shuffling for now
-            raise ValueError(f"{backend} not supported")
+        if lower:
+            backend = self.backend or get_default_shuffle_algorithm()
+            backend = "tasks" if backend == "p2p" else backend
+            if hasattr(backend, "from_abstract_shuffle"):
+                return backend.from_abstract_shuffle(self)
+            elif backend == "disk":
+                return DiskShuffle.from_abstract_shuffle(self)
+            elif backend == "simple":
+                return SimpleShuffle.from_abstract_shuffle(self)
+            elif backend == "tasks":
+                return TaskShuffle.from_abstract_shuffle(self)
+            else:
+                # Only support task-based shuffling for now
+                raise ValueError(f"{backend} not supported")
 
     def _layer(self):
         raise NotImplementedError(
@@ -117,7 +118,7 @@ class ShuffleBackend(Shuffle):
         """Create an Expr tree that uses this ShuffleBackend class"""
         raise NotImplementedError()
 
-    def _simplify_down(self):
+    def _simplify_down(self, lower: bool = True):
         return None
 
 

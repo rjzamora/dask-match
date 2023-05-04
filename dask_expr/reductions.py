@@ -1,10 +1,13 @@
 import functools
+import math
+import operator
 
 import pandas as pd
 import toolz
 from dask.base import tokenize
 from dask.dataframe.core import (
     _concat,
+    hash_shard,
     is_dataframe_like,
     is_series_like,
     make_meta,
@@ -83,14 +86,18 @@ class ApplyConcatApply(Expr):
         return make_meta(meta)
 
     def _divisions(self):
-        return (None, None)
+        return (None,) * (self.split_out + 1)
 
     def _simplify_down(self):
         aca_ref = ExprReference(self)
-        chunked = Chunk(self.frame, aca_ref)
-        if self.split_out > 1:
-            raise NotImplementedError("split_out > 1 is not supported yet")
+        if True:  # self.split_out > 1:
+            # raise NotImplementedError("split_out > 1 is not supported yet")
+            chunked = ChunkSplit(self.frame, aca_ref, self.split_out)
+            return SplitTreeReduction(
+                chunked, aca_ref, self.split_out, self.split_every
+            )
         else:
+            chunked = Chunk(self.frame, aca_ref)
             return TreeReduction(chunked, aca_ref, self.split_every)
 
 
@@ -108,7 +115,7 @@ class Chunk(Blockwise):
 
     @functools.cached_property
     def _name(self):
-        return "chunk-" + tokenize(self.frame, self.aca._name)
+        return "chunk-" + tokenize(self.frame, self.aca._name, *self.operands[2:])
 
     @property
     def aca(self):
@@ -154,7 +161,7 @@ class TreeReduction(Expr):
 
     @functools.cached_property
     def _name(self):
-        return "reduction-" + tokenize(self.frame, self.aca._name)
+        return "reduction-" + tokenize(self.frame, self.aca._name, *self.operands[2:])
 
     @property
     def aca(self):
@@ -216,6 +223,135 @@ class TreeReduction(Expr):
 
     def _divisions(self):
         return (None, None)
+
+
+class ChunkSplit(Chunk):
+    _parameters = ["frame", "aca", "split_out"]
+
+    @staticmethod
+    def chunk_split(*args, chunk_func=None, split_out=None, **kwargs):
+        chunked = chunk_func(*args, **kwargs)
+        return hash_shard(
+            chunked,
+            split_out,
+            # self.split_out_setup,
+            # self.split_out_setup_kwargs,
+            # self.ignore_index,
+        )
+
+    @functools.cached_property
+    def chunk(self):
+        return functools.partial(
+            self.chunk_split,
+            split_out=self.split_out,
+            chunk_func=self.aca.chunk,
+        )
+
+
+class SplitTreeReduction(TreeReduction):
+    _parameters = ["frame", "aca", "split_out", "split_every"]
+    _defaults = {"split_every": 16}
+
+    def _layer(self):
+        aggregate = self.aggregate
+        aggregate_kwargs = self.aggregate_kwargs
+        combine = self.combine
+        combine_kwargs = self.combine_kwargs
+        output_splits = range(self.split_out)
+        split_name = "split-" + self._name
+        tree_node_name = "tree_node-" + self._name
+
+        # Calculate reduction-tree properties
+        parts = self.frame.npartitions
+        widths = [parts]
+        while parts > 1:
+            parts = math.ceil(parts / self.split_every)
+            widths.append(int(parts))
+        height = len(widths)
+
+        # Get each split
+        dsk = {}
+        keys = self.frame.__dask_keys__()
+        for s in output_splits:
+            for p, key in enumerate(keys):
+                dsk[(split_name, p, s)] = (operator.getitem, key, s)
+
+        if height >= 2:
+            # Loop over output splits
+            for s in output_splits:
+                # Loop over reduction levels
+                for depth in range(1, height):
+                    # Loop over reduction groups
+                    for group in range(widths[depth]):
+                        # Calculate inputs for the current group
+                        p_max = widths[depth - 1]
+                        lstart = self.split_every * group
+                        lstop = min(lstart + self.split_every, p_max)
+                        if depth == 1:
+                            # Input nodes are from input layer
+                            keys = [(split_name, p, s) for p in range(lstart, lstop)]
+                        else:
+                            # Input nodes are tree-reduction nodes
+                            keys = [
+                                (tree_node_name, p, depth - 1, s)
+                                for p in range(lstart, lstop)
+                            ]
+
+                        # Define task
+                        if depth == height - 1:
+                            # Final Node (Use fused `self.tree_finalize` task)
+                            assert (
+                                group == 0
+                            ), f"group = {group}, not 0 for final tree reduction task"
+                            dsk[(self._name, s)] = (
+                                apply,
+                                aggregate,
+                                [keys],
+                                aggregate_kwargs,
+                            )
+
+                        else:
+                            # Intermediate Node
+                            if combine_kwargs:
+                                dsk[(tree_node_name, group, depth, s)] = (
+                                    apply,
+                                    combine,
+                                    [keys],
+                                    combine_kwargs,
+                                )
+                            else:
+                                dsk[(tree_node_name, group, depth, s)] = (combine, keys)
+
+        else:
+            # Deal with single-partition case
+            for s in output_splits:
+                keys = [(split_name, 0, s)]
+                dsk[(self._name, s)] = (apply, aggregate, [keys], aggregate_kwargs)
+
+        return dsk
+
+        # d = {}
+        # j = 1
+        # keys = self.frame.__dask_keys__()
+        # # apply combine to batches of intermediate results
+        # while len(keys) > 1:
+        #     new_keys = []
+        #     for i, batch in enumerate(
+        #         toolz.partition_all(self.split_every or len(keys), keys)
+        #     ):
+        #         batch = list(batch)
+        #         if combine_kwargs:
+        #             d[(self._name, j, i)] = (apply, combine, [batch], combine_kwargs)
+        #         else:
+        #             d[(self._name, j, i)] = (combine, batch)
+        #         new_keys.append((self._name, j, i))
+        #     j += 1
+        #     keys = new_keys
+
+        # # apply aggregate to the final result
+        # d[(self._name, 0)] = (apply, aggregate, [keys], aggregate_kwargs)
+
+        # return d
 
 
 class Reduction(ApplyConcatApply):
@@ -383,8 +519,8 @@ class Mode(ApplyConcatApply):
     to ApplyConcatApply
     """
 
-    _parameters = ["frame", "dropna"]
-    _defaults = {"dropna": True}
+    _parameters = ["frame", "dropna", "split_out"]
+    _defaults = {"dropna": True, "split_out": 1}
     chunk = M.value_counts
     split_every = 16
 
@@ -397,7 +533,7 @@ class Mode(ApplyConcatApply):
 
     @classmethod
     def aggregate(cls, results: list[pd.Series], dropna=None):
-        [df] = results
+        df = _concat(results) if len(results) > 1 else results[0]
         max = df.max(skipna=dropna)
         out = df[df == max].index.to_series().sort_values().reset_index(drop=True)
         out.name = results[0].name

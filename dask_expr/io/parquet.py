@@ -45,6 +45,25 @@ _cached_dataset_info = {}
 _cached_plan = {}
 
 
+class MetadataCache:
+    def __init__(self):
+        self._cache = {}
+
+    def get(self, paths, args, func):
+        tpaths, targs = tokenize(paths), tokenize(args)
+        if tpaths in self._cache:
+            if targs not in self._cache[tpaths]:
+                self._cache[tpaths].clear()
+                self._cache[tpaths][targs] = func(*args)
+        else:
+            self._cache[tpaths] = {targs: func(*args)}
+        return self._cache[tpaths][targs]
+
+
+_cached_dataset_info = MetadataCache()
+_cached_plan = MetadataCache()
+
+
 class ReadParquet(PartitionsFiltered, BlockwiseIO):
     """Read a parquet dataset"""
 
@@ -195,13 +214,16 @@ class ReadParquet(PartitionsFiltered, BlockwiseIO):
                 **other_options,
             },
         )
-        dataset_token = tokenize(*args)
-        if dataset_token not in _cached_dataset_info:
-            _cached_dataset_info.clear()
-            _cached_dataset_info[dataset_token] = self.engine._collect_dataset_info(
-                *args
-            )
-        dataset_info = _cached_dataset_info[dataset_token].copy()
+        # dataset_token = (tokenize(paths), tokenize(*args))
+        dataset_info = _cached_dataset_info(
+            paths, args, self.engine._collect_dataset_info
+        ).copy()
+        # if dataset_token not in _cached_dataset_info:
+        #     _cached_dataset_info.clear()
+        #     _cached_dataset_info[dataset_token] = self.engine._collect_dataset_info(
+        #         *args
+        #     )
+        # dataset_info = _cached_dataset_info[dataset_token].copy()
 
         # Infer meta, accounting for index and columns arguments.
         meta = self.engine._create_dd_meta(dataset_info)
@@ -229,7 +251,7 @@ class ReadParquet(PartitionsFiltered, BlockwiseIO):
     @property
     def _plan(self):
         dataset_info = self._dataset_info
-        dataset_token = tokenize(dataset_info)
+        dataset_token = (tokenize(dataset_info["ds"].files), tokenize(dataset_info))
         if dataset_token not in _cached_plan:
             parts, stats, common_kwargs = self.engine._construct_collection_plan(
                 dataset_info

@@ -40,6 +40,7 @@ class Expr:
 
     _parameters = []
     _defaults = {}
+    _simplify_cache = None
 
     def __init__(self, *args, **kwargs):
         operands = list(args)
@@ -211,15 +212,42 @@ class Expr:
     def simplify(self):
         """Simplify expression
 
-        This leverages the ``._simplify_down`` method defined on each class
+        This leverages the ``_simplify_down``, ``_simplify_up``,
+        and ``_lower`` methods defined on each class.
 
         Returns
         -------
         expr:
             output expression
-        changed:
-            whether or not any change occured
         """
+        if self._simplify_cache is not None:
+            # Use cached result
+            return self._simplify_cache
+
+        expr = self
+        for priority in [0, 1]:
+            while True:
+                new = expr._simplify()._reify(priority=priority)
+                if new._name == expr._name:
+                    break
+                else:
+                    expr = new
+        self._simplify_cache = new
+
+        return new
+
+    def _simplify(self):
+        """Simplify expression while preserving abstract nodes
+
+        This leverages the ``_simplify_down`` and ``_simplify_up``
+        methods defined on each class.
+
+        Returns
+        -------
+        expr:
+            output expression
+        """
+
         expr = self
 
         while True:
@@ -255,7 +283,7 @@ class Expr:
             changed = False
             for operand in expr.operands:
                 if isinstance(operand, Expr):
-                    new = operand.simplify()
+                    new = operand._simplify()
                     if new._name != operand._name:
                         changed = True
                 else:
@@ -269,6 +297,51 @@ class Expr:
                 break
 
         return expr
+
+    def _reify(self, priority=1):
+        """Lower abstract expression nodes
+
+        This leverages the ``_lower`` method defined on each class.
+        Each abstract-expression node will only be lowered once.
+        The output expression may include abstract nodes if any
+        ``_lower`` method produces a new abstract expression.
+
+        Returns
+        -------
+        expr:
+            output expression
+        """
+
+        expr = self
+
+        # Lower this node
+        out = expr._lower(priority=priority)
+        if out is None:
+            out = expr
+        if not isinstance(out, Expr):
+            return out
+        if out._name != expr._name:
+            expr = out
+
+        # Lower all of the children
+        new_operands = []
+        changed = False
+        for operand in expr.operands:
+            if isinstance(operand, Expr):
+                new = operand._reify(priority=priority)
+                if new._name != operand._name:
+                    changed = True
+            else:
+                new = operand
+            new_operands.append(new)
+
+        if changed:
+            expr = type(expr)(*new_operands)
+
+        return expr
+
+    def _lower(self, priority=1):
+        return
 
     def _simplify_down(self):
         return

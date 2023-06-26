@@ -90,7 +90,7 @@ class ToParquet(Expr):
     def _divisions(self):
         return (None, None)
 
-    def _simplify_down(self):
+    def _lower(self, priority=1):
         return ToParquetBarrier(
             ToParquetData(
                 *self.operands,

@@ -305,7 +305,7 @@ class Std(SingleAggregation):
     def _meta(self):
         return self.simplify()._meta
 
-    def _simplify_down(self):
+    def _lower(self, priority=1):
         v = Var(*self.operands)
         return MapPartitions(
             v,
@@ -322,7 +322,7 @@ class Mean(SingleAggregation):
     def _meta(self):
         return self.simplify()._meta
 
-    def _simplify_down(self):
+    def _lower(self, priority=1):
         s = Sum(*self.operands)
         # Drop chunk/aggregate_kwargs for count
         c = Count(

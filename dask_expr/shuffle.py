@@ -81,7 +81,7 @@ class Shuffle(Expr):
     def _node_label_args(self):
         return [self.frame, self.partitioning_index]
 
-    def _simplify_down(self):
+    def _lower(self, priority=1):
         # Use `backend` to decide how to compose a
         # shuffle operation from concerete expressions
         backend = self.backend or get_default_shuffle_method()
@@ -183,6 +183,9 @@ class ShuffleBackend(Shuffle):
     def from_abstract_shuffle(cls, expr: Shuffle) -> Expr:
         """Create an Expr tree that uses this ShuffleBackend class"""
         raise NotImplementedError()
+
+    def _lower(self, priority=1):
+        return None
 
     def _simplify_down(self):
         return None

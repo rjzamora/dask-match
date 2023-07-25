@@ -14,7 +14,7 @@ from dask.dataframe.core import (
     make_meta,
     meta_nonempty,
 )
-from dask.utils import M, apply, funcname
+from dask.utils import M, apply, funcname, get_meta_library
 
 from dask_expr._expr import Blockwise, Elemwise, Expr, Index, Projection
 from dask_expr._util import is_scalar
@@ -299,30 +299,33 @@ class PivotTable(ApplyConcatApply):
     @functools.cached_property
     def _meta(self):
         df = self.frame._meta
+        lib = get_meta_library(df)
         columns = self.operand("columns")
         values = self.operand("values")
         index = self.operand("index")
-        columns_contents = pd.CategoricalIndex(df[columns].cat.categories, name=columns)
+        columns_contents = lib.CategoricalIndex(
+            df[columns].cat.categories, name=columns
+        )
 
         if is_scalar(values):
             new_columns = columns_contents
         else:
-            new_columns = pd.MultiIndex.from_product(
+            new_columns = lib.MultiIndex.from_product(
                 (sorted(values), columns_contents), names=[None, columns]
             )
 
         if self.operand("aggfunc") in ["first", "last"]:
             # Infer datatype as non-numeric values are allowed
             if is_scalar(values):
-                meta = pd.DataFrame(
+                meta = lib.DataFrame(
                     columns=new_columns,
                     dtype=df[values].dtype,
-                    index=pd.Index(df[index]),
+                    index=lib.Index(df[index]),
                 )
             else:
-                meta = pd.DataFrame(
+                meta = lib.DataFrame(
                     columns=new_columns,
-                    index=pd.Index(df[index]),
+                    index=lib.Index(df[index]),
                 )
                 for value_col in values:
                     meta[value_col] = meta[value_col].astype(
@@ -330,8 +333,8 @@ class PivotTable(ApplyConcatApply):
                     )
         else:
             # Use float64 as other aggregate functions require numerical data
-            meta = pd.DataFrame(
-                columns=new_columns, dtype=np.float64, index=pd.Index(df[index])
+            meta = lib.DataFrame(
+                columns=new_columns, dtype=np.float64, index=lib.Index(df[index])
             )
         return meta
 

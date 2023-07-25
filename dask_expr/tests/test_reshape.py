@@ -7,6 +7,7 @@ from dask.dataframe import assert_eq
 from dask_expr import from_pandas
 
 BACKEND = dask.config.get("dataframe.backend", "pandas")
+CUDF_BACKEND = BACKEND == "cudf"
 lib = importlib.import_module(BACKEND)
 
 
@@ -28,6 +29,7 @@ def df(pdf):
     yield from_pandas(pdf, npartitions=3)
 
 
+@pytest.mark.xfail(CUDF_BACKEND, reason="cudf backend does not not support pivot_table")
 @pytest.mark.parametrize("aggfunc", ["first", "last", "sum", "mean", "count"])
 def test_pivot_table(df, pdf, aggfunc):
     assert_eq(
@@ -43,6 +45,7 @@ def test_pivot_table(df, pdf, aggfunc):
     )
 
 
+@pytest.mark.xfail(CUDF_BACKEND, reason="cudf backend does not not support pivot_table")
 def test_pivot_table_fails(df):
     with pytest.raises(ValueError, match="must be the name of an existing column"):
         df.pivot_table(index="aaa", columns="y", values="z")

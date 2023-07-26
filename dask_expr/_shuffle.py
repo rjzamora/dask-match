@@ -891,7 +891,12 @@ class _SetIndexPost(Blockwise):
     _parameters = ["frame", "index_name", "drop", "set_name"]
 
     def operation(self, df, index_name, drop, set_name):
-        return df.set_index(set_name, drop=drop).rename_axis(index=index_name)
+        if hasattr(df, "rename_axis"):
+            return df.set_index(set_name, drop=drop).rename_axis(index=index_name)
+        else:
+            result = df.set_index(set_name, drop=drop)
+            result.index.name = index_name
+            return result
 
 
 class SortIndexBlockwise(Blockwise):

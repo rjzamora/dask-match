@@ -4,7 +4,7 @@ from dask.dataframe.utils import assert_eq
 from dask_expr import SetIndexBlockwise, from_pandas
 from dask_expr._expr import Blockwise
 from dask_expr.io import FromPandas
-from dask_expr.tests._util import _backend_library
+from dask_expr.tests._util import _backend_library, xfail_gpu
 
 # Set DataFrame backend for this module
 lib = _backend_library()
@@ -20,6 +20,7 @@ def df(pdf):
     return from_pandas(pdf, npartitions=10)
 
 
+@xfail_gpu()
 @pytest.mark.parametrize("ignore_index", [True, False])
 @pytest.mark.parametrize("npartitions", [3, 6])
 def test_disk_shuffle(ignore_index, npartitions, df):
@@ -78,7 +79,8 @@ def test_task_shuffle(ignore_index, npartitions, max_branch, df):
     # If any values of "x" can be found in multiple
     # partitions, this will fail
     df3 = df2["x"].map_partitions(lambda x: x.drop_duplicates())
-    assert sorted(df3.compute().tolist()) == list(range(20))
+    # Note: `values.tolist()` needed for gpu support
+    assert sorted(df3.compute().values.tolist()) == list(range(20))
 
     # Check `partitions` after shuffle
     a = df2.partitions[1]
@@ -88,7 +90,10 @@ def test_task_shuffle(ignore_index, npartitions, max_branch, df):
         npartitions=npartitions,
         ignore_index=ignore_index,
     ).partitions[1]
-    assert set(a["x"].compute()).issubset(b["y"].compute())
+    # Note: `values.tolist()` needed for gpu support
+    assert set(a["x"].compute().values.tolist()).issubset(
+        b["y"].compute().values.tolist()
+    )
 
     # Check for culling
     assert len(a.optimize().dask) < len(df2.optimize().dask)
@@ -117,7 +122,8 @@ def test_task_shuffle_index(npartitions, max_branch, pdf):
     # If any values of "x" can be found in multiple
     # partitions, this will fail
     df3 = df2.index.map_partitions(lambda x: x.drop_duplicates())
-    assert sorted(df3.compute().tolist()) == list(range(20))
+    # Note: `values.tolist()` needed for gpu support
+    assert sorted(df3.compute().values.tolist()) == list(range(20))
 
 
 def test_shuffle_column_projection(df):
@@ -215,11 +221,11 @@ def test_set_index_without_sort(df, pdf):
 
 
 def test_sort_values(df, pdf):
-    assert_eq(df.sort_values("x"), pdf.sort_values("x"))
-    assert_eq(df.sort_values("x", npartitions=2), pdf.sort_values("x"))
+    assert_eq(df.sort_values("x", shuffle="tasks"), pdf.sort_values("x"))
+    assert_eq(df.sort_values("x", npartitions=2, shuffle="tasks"), pdf.sort_values("x"))
     pdf.iloc[5, 0] = -10
     df = from_pandas(pdf, npartitions=10)
-    assert_eq(df.sort_values("x", upsample=2.0), pdf.sort_values("x"))
+    assert_eq(df.sort_values("x", upsample=2.0, shuffle="tasks"), pdf.sort_values("x"))
 
     with pytest.raises(NotImplementedError, match="a single boolean for ascending"):
         df.sort_values(by=["x", "y"], ascending=[True, True])

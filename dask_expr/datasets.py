@@ -1,11 +1,12 @@
 import functools
+import operator
 
 import numpy as np
 import pandas as pd
 from dask.utils import random_state_data
 
 from dask_expr._collection import new_collection
-from dask_expr._expr import Projection
+from dask_expr._util import _convert_to_list
 from dask_expr.io import BlockwiseIO, PartitionsFiltered
 
 __all__ = ["timeseries"]
@@ -21,6 +22,8 @@ class Timeseries(PartitionsFiltered, BlockwiseIO):
         "seed",
         "kwargs",
         "_partitions",
+        "columns",
+        "_series",
     ]
     _defaults = {
         "start": "2000-01-01",
@@ -31,15 +34,32 @@ class Timeseries(PartitionsFiltered, BlockwiseIO):
         "seed": None,
         "kwargs": {},
         "_partitions": None,
+        "columns": None,
+        "_series": False,
     }
+    _absorb_projections = True
+
+    @functools.cached_property
+    def dtypes(self):
+        dtypes = self.operand("dtypes")
+        columns = _convert_to_list(self.operand("columns"))
+        if columns is None:
+            return dtypes
+        return {k: v for k, v in dtypes.items() if k in columns}
+
+    @property
+    def columns(self):
+        return list(self.dtypes.keys())
 
     @functools.cached_property
     def _meta(self):
-        dtypes = self.operand("dtypes")
-        states = [0] * len(dtypes)
-        return make_timeseries_part(
-            "2000", "2000", dtypes, list(dtypes.keys()), "1H", states, self.kwargs
+        states = [0] * len(self.dtypes)
+        result = make_timeseries_part(
+            "2000", "2000", self.dtypes, self.columns, "1H", states, self.kwargs
         ).iloc[:0]
+        if self._series:
+            return result[self.columns[0]]
+        return result
 
     def _divisions(self):
         return pd.date_range(start=self.start, end=self.end, freq=self.partition_freq)
@@ -53,42 +73,28 @@ class Timeseries(PartitionsFiltered, BlockwiseIO):
                 if self.seed is None
                 else random_state_data(npartitions, self.seed)
             )
-            for k in self.operand("dtypes")
+            for k in self.dtypes
         }
 
     def _filtered_task(self, index):
         full_divisions = self._divisions()
-        column_states = [self.random_state[k][index] for k in self.operand("dtypes")]
+        column_states = [self.random_state[k][index] for k in self.dtypes]
         if self.seed is not None and len(column_states) > 0:
             # These will be the same anyway, so avoid serializing all of them
             column_states = [column_states[0]]
-        return (
+        task = (
             make_timeseries_part,
             full_divisions[index],
             full_divisions[index + 1],
-            self.operand("dtypes"),
+            self.dtypes,
             self.columns,
             self.freq,
             column_states,
             self.kwargs,
         )
-
-    def _simplify_up(self, parent):
-        if isinstance(parent, Projection) and len(self.dtypes) > 1:
-            dtypes = {col: self.operand("dtypes")[col] for col in parent.columns}
-            out = Timeseries(
-                self.start,
-                self.end,
-                dtypes=dtypes,
-                freq=self.freq,
-                partition_freq=self.partition_freq,
-                seed=self.seed,
-                kwargs=self.kwargs,
-                _partitions=self.operand("_partitions"),
-            )
-            if not isinstance(parent.operand("columns"), (list, pd.Index)):  # series
-                out = out[parent.operand("columns")]
-            return out
+        if self._series:
+            return (operator.getitem, task, self.columns[0])
+        return task
 
 
 names = [

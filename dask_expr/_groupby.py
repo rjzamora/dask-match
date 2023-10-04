@@ -593,6 +593,8 @@ class GroupBy:
         return self._aca_agg(Std, ddof=ddof, numeric_only=numeric_only)
 
     def aggregate(self, arg=None, split_every=8, split_out=1):
+        from dask_expr._dispatch import GroupbyAggregationDispatch
+
         if arg is None:
             raise NotImplementedError("arg=None not supported")
 
@@ -600,7 +602,7 @@ class GroupBy:
             raise NotImplementedError("split_out>1 not yet supported")
 
         return new_collection(
-            GroupbyAggregation(
+            GroupbyAggregationDispatch(
                 self.obj.expr,
                 self.by,
                 arg,

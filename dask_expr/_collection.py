@@ -31,6 +31,7 @@ from dask_expr._align import AlignPartitions
 from dask_expr._categorical import CategoricalAccessor
 from dask_expr._concat import Concat
 from dask_expr._datetime import DatetimeAccessor
+from dask_expr._dispatch import get_dataframe_class, get_index_class, get_series_class
 from dask_expr._expr import Eval, no_default
 from dask_expr._merge import JoinRecursive, Merge
 from dask_expr._quantiles import RepartitionQuantiles
@@ -341,14 +342,15 @@ class FrameBase(DaskMethodsMixin):
         )
 
     def groupby(self, by, **kwargs):
-        from dask_expr._groupby import GroupBy
+        from dask_expr._groupby import get_groupby_class
 
         if isinstance(by, FrameBase) and not isinstance(by, Series):
             raise ValueError(
                 f"`by` must be a column name or list of columns, got {by}."
             )
 
-        return GroupBy(self, by, **kwargs)
+        meta = self._meta
+        return get_groupby_class(meta)(self, by, **kwargs)
 
     def map_partitions(
         self,
@@ -1093,17 +1095,23 @@ class Scalar(FrameBase):
         return first, ()
 
 
+# Set collection dispatch defaults
+get_dataframe_class.set_default(DataFrame)
+get_series_class.set_default(Series)
+get_index_class.set_default(Index)
+
+
 def new_collection(expr):
     """Create new collection from an expr"""
 
     meta = expr._meta
     expr._name  # Ensure backend is imported
     if is_dataframe_like(meta):
-        return DataFrame(expr)
+        return get_dataframe_class(meta)(expr)
     elif is_series_like(meta):
-        return Series(expr)
+        return get_series_class(meta)(expr)
     elif is_index_like(meta):
-        return Index(expr)
+        return get_index_class(meta)(expr)
     else:
         return Scalar(expr)
 

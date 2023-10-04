@@ -21,6 +21,7 @@ from dask.dataframe.groupby import (
 from dask.utils import M, is_index_like
 
 from dask_expr._collection import DataFrame, Index, Series, new_collection
+from dask_expr._dispatch import get_groupby_class
 from dask_expr._expr import Expr, MapPartitions, Projection
 from dask_expr._reductions import ApplyConcatApply, Chunk, Reduction
 
@@ -612,3 +613,6 @@ class GroupBy:
 
     def agg(self, *args, **kwargs):
         return self.aggregate(*args, **kwargs)
+
+
+get_groupby_class.set_default(GroupBy)

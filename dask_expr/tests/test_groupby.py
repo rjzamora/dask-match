@@ -106,7 +106,7 @@ def test_groupby_series(pdf, df):
 def test_groupby_agg(pdf, df, spec):
     g = df.groupby("x")
     agg = g.agg(spec)
-
+    agg.compute(scheduler="synchronous")
     expect = pdf.groupby("x").agg(spec)
     assert_eq(agg, expect)
 

@@ -21,7 +21,14 @@ from dask.dataframe.shuffle import (
 )
 from dask.utils import M, digit, get_default_shuffle_method, insert
 
-from dask_expr._expr import Assign, Blockwise, Expr, PartitionsFiltered, Projection
+from dask_expr._expr import (
+    Assign,
+    Blockwise,
+    Expr,
+    Filter,
+    PartitionsFiltered,
+    Projection,
+)
 from dask_expr._reductions import (
     All,
     Any,
@@ -42,8 +49,8 @@ from dask_expr._reductions import (
     Unique,
     ValueCounts,
 )
-from dask_expr._repartition import Repartition
-from dask_expr._util import LRU
+from dask_expr._repartition import Repartition, RepartitionToFewer
+from dask_expr._util import DASK_GT_20231000, LRU
 
 
 class Shuffle(Expr):
@@ -217,7 +224,7 @@ class SimpleShuffle(PartitionsFiltered, ShuffleBackend):
 
         # Reduce partition count if necessary
         if npartitions_out < frame.npartitions:
-            frame = Repartition(frame, n=npartitions_out)
+            frame = Repartition(frame, new_partitions=npartitions_out)
 
         if partitioning_index != ["_partitions"]:
             if cls.lazy_hash_support:
@@ -488,6 +495,7 @@ class P2PShuffle(SimpleShuffle):
         parts_out = (
             self._partitions if self._filtered else list(range(self.npartitions_out))
         )
+        disk = [] if not DASK_GT_20231000 else (True,)
         for i in range(self.frame.npartitions):
             transfer_keys.append((name, i))
             dsk[(name, i)] = (
@@ -499,6 +507,7 @@ class P2PShuffle(SimpleShuffle):
                 self.partitioning_index,
                 self.frame._meta,
                 set(parts_out),
+                *disk,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
@@ -619,6 +628,18 @@ class AssignPartitioningIndex(Blockwise):
             index = partitioning_index(index, npartitions)
         return df.assign(**{name: index})
 
+    def _combine_similar(self, root: Expr):
+        return self._combine_similar_branches(root, (Filter, Projection))
+
+    def _remove_operations(self, frame, remove_ops, skip_ops=None):
+        expr, ops = super()._remove_operations(frame, remove_ops, skip_ops)
+        if len(ops) > 0 and isinstance(ops[0], list):
+            if sorted(ops[0]) == sorted(self.frame.columns):
+                expr, ops = super()._remove_operations(frame, remove_ops, skip_ops)
+                return expr, []
+            ops[0] = ops[0] + [self.index_name]
+        return expr, ops
+
 
 class BaseSetIndexSortValues(Expr):
     _is_length_preserving = True
@@ -686,6 +707,9 @@ class SetIndex(BaseSetIndexSortValues):
     def _divisions(self):
         if self.user_divisions is not None:
             return self.user_divisions
+        if self.npartitions == 1:
+            return (None, None)
+
         divisions, mins, maxes, presorted = _get_divisions(
             self.frame,
             self.other,
@@ -718,6 +742,14 @@ class SetIndex(BaseSetIndexSortValues):
         return self.frame[self._other]
 
     def _lower(self):
+        if self.npartitions == 1:
+            expr = self.frame
+            if self.frame.npartitions > 1:
+                expr = RepartitionToFewer(expr, 1)
+
+            index_set = SetIndexBlockwise(expr, self._other, self.drop, None)
+            return SortIndexBlockwise(index_set)
+
         if self.user_divisions is None:
             divisions = self._divisions()
             presorted = _get_divisions(
@@ -810,6 +842,10 @@ class SortValues(BaseSetIndexSortValues):
     }
 
     def _divisions(self):
+        if self.frame.npartitions == 1:
+            # Protect against triggering calculations when we only have one division
+            return (None, None)
+
         divisions, mins, maxes, presorted = _get_divisions(
             self.frame,
             self.frame[self.by[0]],
@@ -844,6 +880,11 @@ class SortValues(BaseSetIndexSortValues):
         return self.frame._meta
 
     def _lower(self):
+        if self.frame.npartitions == 1:
+            return SortValuesBlockwise(
+                self.frame, self.sort_function, self.sort_function_kwargs
+            )
+
         by = self.frame[self.by[0]]
         divisions, _, _, presorted = _get_divisions(
             self.frame, by, self.npartitions, self.ascending, upsample=self.upsample

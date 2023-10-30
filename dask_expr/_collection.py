@@ -1049,8 +1049,8 @@ class Series(FrameBase):
     def memory_usage(self, deep=False, index=True):
         return new_collection(MemoryUsageFrame(self.expr, deep=deep, _index=index))
 
-    def unique(self):
-        return new_collection(Unique(self.expr))
+    def unique(self, split_out=1):
+        return new_collection(Unique(self.expr, split_out=split_out))
 
     def drop_duplicates(self, ignore_index=False, split_out=1):
         return new_collection(

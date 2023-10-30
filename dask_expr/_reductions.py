@@ -25,6 +25,7 @@ from dask_expr._expr import (
     Expr,
     Index,
     Projection,
+    RenameAxis,
     RenameFrame,
     ResetIndex,
     ToFrame,
@@ -122,12 +123,14 @@ class ShuffleReduce(Expr):
         "aggregate",
         "combine_kwargs",
         "aggregate_kwargs",
+        "ignore_index",
         "split_by",
         "split_every",
         "split_out",
         "sort",
     ]
     _defaults = {
+        "ignore_index": False,
         "split_every": 8,
         "split_out": True,
         "sort": None,
@@ -173,25 +176,27 @@ class ShuffleReduce(Expr):
             chunked = RenameFrame(chunked, map_columns)
 
         # Sort or shuffle
+        split_out = (
+            chunked.npartitions if self.split_out is True else int(self.split_out or 1)
+        )
         split_every = getattr(self, "split_every", 0) or chunked.npartitions
-        ignore_index = getattr(self, "ignore_index", True)
         shuffle_npartitions = max(
             chunked.npartitions // split_every,
-            self.split_out,
+            split_out,
         )
         if self.sort:
             shuffled = SortValues(
                 chunked,
                 split_by,
                 npartitions=shuffle_npartitions,
-                ignore_index=ignore_index,
+                ignore_index=self.ignore_index,
             )
         else:
             shuffled = Shuffle(
                 chunked,
                 split_by,
                 shuffle_npartitions,
-                ignore_index=ignore_index,
+                ignore_index=self.ignore_index,
             )
 
         # Unmap column names if necessary
@@ -206,6 +211,13 @@ class ShuffleReduce(Expr):
         # Convert back to Series if necessary
         if is_series_like(self._meta):
             shuffled = shuffled[shuffled.columns[0]]
+            # TODO: Fix case where Series name is "__series__"
+        elif is_index_like(self._meta):
+            divisions = (None,) * (shuffle_npartitions + 1)
+            shuffled = SetIndexBlockwise(shuffled, shuffled.columns[0], True, divisions)
+            if columns == ["__index__"]:
+                shuffled = RenameAxis(shuffled, index=None)
+            shuffled = shuffled.index
 
         # Blockwise aggregate
         result = Aggregate(
@@ -216,8 +228,12 @@ class ShuffleReduce(Expr):
         )
 
         # Repartition and return
-        if self.split_out < result.npartitions:
-            return Repartition(result, npartitions=self.split_out)
+        if split_out < result.npartitions:
+            result = Repartition(result, npartitions=split_out)
+
+        # Reset index if ignore_index == True
+        if self.ignore_index and not is_index_like(result._meta):
+            return ResetIndex(result, drop=True)
         return result
 
     @property
@@ -431,6 +447,7 @@ class ApplyConcatApply(Expr):
             )
 
         # Lower into ShuffleReduce
+        ignore_index = getattr(self, "ignore_index", True)
         return ShuffleReduce(
             chunked,
             type(self),
@@ -439,6 +456,7 @@ class ApplyConcatApply(Expr):
             aggregate,
             combine_kwargs,
             aggregate_kwargs,
+            ignore_index,
             split_by=self.split_by,
             split_out=self.split_out,
             split_every=split_every,
@@ -447,7 +465,8 @@ class ApplyConcatApply(Expr):
 
 
 class Unique(ApplyConcatApply):
-    _parameters = ["frame"]
+    _parameters = ["frame", "ignore_index", "split_out"]
+    _defaults = {"ignore_index": True, "split_out": 1}
     chunk = staticmethod(methods.unique)
     aggregate_func = staticmethod(methods.unique)
 

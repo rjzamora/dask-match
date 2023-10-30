@@ -900,15 +900,32 @@ def test_drop_duplicates(df, pdf, split_out):
         df.x.drop_duplicates(subset=["a"], split_out=split_out)
 
 
-def test_unique(df, pdf):
+@pytest.mark.parametrize("split_out", [1, True])
+@pytest.mark.parametrize("index_name", [None, "index"])
+def test_unique(index_name, split_out):
+    pdf = lib.DataFrame(
+        {"x": [1, 2, 3, 4] * 5, "y": range(20), "index": [1, 2, 3, 4] * 5}
+    )
+    pdf = pdf.set_index("index")
+    pdf.index.name = index_name
+    df = from_pandas(pdf, 4)
+
     with pytest.raises(
         AttributeError, match="'DataFrame' object has no attribute 'unique'"
     ):
         df.unique()
 
     # pandas returns a numpy array while we return a Series/Index
-    assert_eq(df.x.unique(), lib.Series(pdf.x.unique(), name="x"))
-    assert_eq(df.index.unique(), lib.Index(pdf.index.unique()))
+    assert_eq(
+        df.x.unique(split_out=split_out),
+        lib.Series(pdf.x.unique(), name="x"),
+        check_index=False,
+    )
+    # Need to sort index result for `split_out=True`
+    assert_eq(
+        df.index.unique(split_out=split_out).compute().sort_values(),
+        lib.Index(pdf.index.unique()),
+    )
 
 
 def test_walk(df):

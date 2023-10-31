@@ -151,6 +151,7 @@ class ShuffleReduce(Expr):
         from dask_expr._shuffle import SetIndexBlockwise, Shuffle, SortValues
 
         if is_index_like(self.frame._meta):
+            # TODO: Use known divisions
             columns = [self.frame._meta.name or "__index__"]
         elif is_series_like(self.frame._meta):
             columns = [self.frame._meta.name or "__series__"]
@@ -210,9 +211,10 @@ class ShuffleReduce(Expr):
 
         # Convert back to Series if necessary
         if is_series_like(self._meta):
+            # TODO: Fix case where `Series` name is "__series__"
             shuffled = shuffled[shuffled.columns[0]]
-            # TODO: Fix case where Series name is "__series__"
         elif is_index_like(self._meta):
+            # TODO: Use known divisions if `sort=True`
             divisions = (None,) * (shuffle_npartitions + 1)
             shuffled = SetIndexBlockwise(shuffled, shuffled.columns[0], True, divisions)
             if columns == ["__index__"]:
@@ -229,11 +231,7 @@ class ShuffleReduce(Expr):
 
         # Repartition and return
         if split_out < result.npartitions:
-            result = Repartition(result, npartitions=split_out)
-
-        # Reset index if ignore_index == True
-        if self.ignore_index and not is_index_like(result._meta):
-            return ResetIndex(result, drop=True)
+            result = Repartition(result, new_partitions=split_out)
         return result
 
     @property
@@ -433,6 +431,24 @@ class ApplyConcatApply(Expr):
         chunked = self._chunk_cls(
             self.frame, type(self), chunk, chunk_kwargs, *self._chunk_cls_args
         )
+
+        # # Check if we can leverage known divisions
+        # from dask_expr._repartition import Repartition
+        #
+        # if self.frame.known_divisions and (
+        #     is_index_like(self.frame._meta) or
+        #     isinstance(self.split_by, (str, list)) and
+        #     set(self.split_by) - set(self.frame.columns)
+        # ):
+        #     # We are already done! Repartition and return
+        #     if self.split_out is True:
+        #         split_out = chunked.npartitions
+        #     else:
+        #         split_out = int(self.split_out)
+        #     if split_out < chunked.npartitions:
+        #         return Repartition(chunked, new_partitions=split_out)
+        #     return chunked
+
         if not isinstance(self.split_out, bool) and self.split_out == 1 or sort:
             # Lower into TreeReduce(Chunk)
             return TreeReduce(

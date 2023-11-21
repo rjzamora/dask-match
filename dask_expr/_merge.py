@@ -90,6 +90,11 @@ class Merge(Expr):
         right = meta_nonempty(self.right._meta)
         return make_meta(left.merge(right, **self.kwargs))
 
+    def __exec__(self):
+        left = self.left.__exec__()
+        right = self.right.__exec__()
+        return left.merge(right, **self.kwargs)
+
     def _divisions(self):
         npartitions_left = self.left.npartitions
         npartitions_right = self.right.npartitions

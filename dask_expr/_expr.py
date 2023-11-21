@@ -61,6 +61,11 @@ class Expr:
                 # avoid infinite recursion
                 raise ValueError(f"{dep} has no attribute {self._required_attribute}")
 
+    def __exec__(self):
+        raise NotImplementedError(
+            f"Backend exec is not yet supported for {type(self)}."
+        )
+
     @property
     def _required_attribute(self) -> str:
         # Specify if the first `dependency` must support
@@ -1117,6 +1122,10 @@ class Blockwise(Expr):
     @functools.cached_property
     def _meta(self):
         args = [op._meta if isinstance(op, Expr) else op for op in self._args]
+        return self.operation(*args, **self._kwargs)
+
+    def __exec__(self):
+        args = [op.__exec__() if isinstance(op, Expr) else op for op in self._args]
         return self.operation(*args, **self._kwargs)
 
     @functools.cached_property

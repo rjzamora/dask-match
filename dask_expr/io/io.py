@@ -371,6 +371,12 @@ class FromPandas(PartitionsFiltered, BlockwiseIO):
             return _BackendData(frame)
         return self.operand("frame")
 
+    def __exec__(self):
+        pdf = self.operand("frame")._data
+        if self.columns:
+            return pdf[self.columns[0]] if self._series else pdf[self.columns]
+        return pdf
+
     @functools.cached_property
     def _meta(self):
         meta = self.frame.head(0)

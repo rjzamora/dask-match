@@ -1303,3 +1303,11 @@ def test_replace_filtered_combine_similar():
     # Filter expressions (and not the other way around)
     similar = list(df.find_operations(Replace))
     assert all(isinstance(op.frame, Filter) for op in similar)
+
+
+def test_exec():
+    pdf = lib.DataFrame({"a": [1, 2, 3, 4, 5, 6], "b": 1, "c": 2})
+    df = from_pandas(pdf.copy())
+    result = (df + 1).sort_values("a")["a"]
+    result_pd = (pdf + 1).sort_values("a")["a"]
+    assert_eq(result.exec(), result_pd)

@@ -157,8 +157,8 @@ class FrameBase(DaskMethodsMixin):
         out = self.optimize(combine_similar=combine_similar, fuse=fuse)
         return DaskMethodsMixin.compute(out, **kwargs)
 
-    def exec(self):
-        out = self.simplify()
+    def exec(self, simplify=True):
+        out = self.simplify() if simplify else self
         return out.expr.__exec__()
 
     def __dask_graph__(self):

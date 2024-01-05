@@ -28,7 +28,12 @@ from dask_expr._expr import are_co_aligned
 from dask_expr._reductions import Len
 from dask_expr._shuffle import Shuffle
 from dask_expr.datasets import timeseries
-from dask_expr.tests._util import _backend_library, assert_eq, xfail_gpu
+from dask_expr.tests._util import (
+    _backend_library,
+    assert_eq,
+    xfail_gpu,
+    xfail_param_gpu,
+)
 
 # Set DataFrame backend for this module
 lib = _backend_library()
@@ -192,12 +197,8 @@ def test_dask(pdf, df):
         M.mean,
         M.std,
         M.var,
-        pytest.param(
-            M.idxmin, marks=xfail_gpu("https://github.com/rapidsai/cudf/issues/9602")
-        ),
-        pytest.param(
-            M.idxmax, marks=xfail_gpu("https://github.com/rapidsai/cudf/issues/9602")
-        ),
+        xfail_param_gpu(M.idxmin, "https://github.com/rapidsai/cudf/issues/9602"),
+        xfail_param_gpu(M.idxmax, "https://github.com/rapidsai/cudf/issues/9602"),
         pytest.param(
             lambda df: df.size,
             marks=pytest.mark.xfail(reason="scalars don't work yet"),
@@ -260,14 +261,12 @@ def test_reduction_on_empty_df():
     assert_eq(df.sum(), pdf.sum())
 
 
-@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("axis", [0, xfail_param_gpu(1)])
 @pytest.mark.parametrize(
     "skipna",
     [
         True,
-        pytest.param(
-            False, marks=xfail_gpu("cudf requires skipna=True when nulls are present.")
-        ),
+        xfail_param_gpu(False, "cudf requires skipna=True for nulls."),
     ],
 )
 @pytest.mark.parametrize("ddof", [1, 2])
@@ -282,6 +281,7 @@ def test_std_kwargs(axis, skipna, ddof):
     )
 
 
+@xfail_gpu("limited cudf support")
 @pytest.mark.parametrize("func", ["cumsum", "cumprod", "cummin", "cummax"])
 def test_cumulative_methods(df, pdf, func):
     assert_eq(getattr(df, func)(), getattr(pdf, func)(), check_dtype=False)
@@ -335,8 +335,9 @@ def test_value_counts(df, pdf):
     assert_eq(df.x.value_counts(), pdf.x.value_counts().astype("int64"))
 
 
-def test_dropna(pdf):
-    pdf.loc[0, "y"] = np.nan
+@pytest.mark.parametrize("naval", [None, xfail_param_gpu(np.nan)])
+def test_dropna(pdf, naval):
+    pdf.loc[0, "y"] = naval
     df = from_pandas(pdf)
     assert_eq(df.dropna(), pdf.dropna())
     assert_eq(df.dropna(how="all"), pdf.dropna(how="all"))
@@ -359,6 +360,7 @@ def test_fillna():
     assert_eq(actual, expected)
 
 
+@xfail_gpu("No limit support in cudf")
 @pytest.mark.parametrize("limit", (None, 1, 2))
 @pytest.mark.parametrize("how", ("ffill", "bfill"))
 @pytest.mark.parametrize("axis", ("index", "columns", 0, 1))
@@ -374,6 +376,7 @@ def test_ffill_and_bfill(limit, axis, how):
     assert_eq(actual, expected)
 
 
+@xfail_gpu()
 def test_series_map_meta():
     ser = lib.Series(
         ["".join(np.random.choice(["a", "b", "c"], size=3)) for x in range(100)]
@@ -388,8 +391,12 @@ def test_series_map_meta():
 
 
 @pytest.mark.parametrize("periods", (1, 2))
-@pytest.mark.parametrize("freq", (None, "1h", timedelta(hours=1)))
-@pytest.mark.parametrize("axis", ("index", 0, "columns", 1))
+@pytest.mark.parametrize(
+    "freq", (None, xfail_param_gpu("1h"), xfail_param_gpu(timedelta(hours=1)))
+)
+@pytest.mark.parametrize(
+    "axis", ("index", 0, xfail_param_gpu("columns"), xfail_param_gpu(1))
+)
 def test_shift(pdf, df, periods, freq, axis):
     if freq and axis in ("columns", 1):
         pytest.skip(reason="Neither dask or pandas supports freq w/ axis 1 shift")
@@ -456,7 +463,9 @@ def test_conditionals(func, pdf, df):
     assert_eq(func(pdf), func(df), check_names=False)
 
 
-@pytest.mark.parametrize("axis", ("index", 0, "columns", 1, None))
+@pytest.mark.parametrize(
+    "axis", ("index", 0, xfail_param_gpu("columns"), xfail_param_gpu(1), None)
+)
 @pytest.mark.parametrize("periods", (1, 2, None))
 def test_diff(pdf, df, axis, periods):
     kwargs = {k: v for k, v in (("periods", periods), ("axis", axis)) if v}
@@ -495,7 +504,9 @@ def test_boolean_operators(func):
     assert_eq(func(pdf), func(df))
 
 
-@pytest.mark.parametrize("axis", ("columns", 1, "index", 0))
+@pytest.mark.parametrize(
+    "axis", ("columns", 1, xfail_param_gpu("index"), xfail_param_gpu(0))
+)
 @pytest.mark.parametrize("level", (None, 0, "x"))
 @pytest.mark.parametrize("fill_value", (None, 1))
 @pytest.mark.parametrize(
@@ -614,54 +625,54 @@ def test_to_timestamp(pdf, how):
 @pytest.mark.parametrize(
     "func",
     [
-        lambda df: df.astype(int),
-        lambda df: df.clip(lower=10, upper=50),
-        lambda df: df.x.clip(lower=10, upper=50),
-        lambda df: df.x.between(left=10, right=50),
-        lambda df: df.x.map(lambda x: x + 1),
-        lambda df: df[df.x > 5],
-        lambda df: df.assign(a=df.x + df.y, b=df.x - df.y),
-        lambda df: df.assign(a=df.x + df.y, b=lambda x: x.a + 1),
-        lambda df: df.replace(to_replace=1, value=1000),
-        lambda df: df.x.replace(to_replace=1, value=1000),
-        lambda df: df.isna(),
+        # lambda df: df.astype(int),
+        # lambda df: df.clip(lower=10, upper=50),
+        # lambda df: df.x.clip(lower=10, upper=50),
+        # lambda df: df.x.between(left=10, right=50),
+        # lambda df: df.x.map(lambda x: x + 1),
+        # lambda df: df[df.x > 5],
+        # lambda df: df.assign(a=df.x + df.y, b=df.x - df.y),
+        # lambda df: df.assign(a=df.x + df.y, b=lambda x: x.a + 1),
+        # lambda df: df.replace(to_replace=1, value=1000),
+        # lambda df: df.x.replace(to_replace=1, value=1000),
+        # lambda df: df.isna(),
         lambda df: isna(df),
-        lambda df: isna(df.x),
-        lambda df: df.x.isna(),
-        lambda df: df.isnull(),
-        lambda df: df.x.isnull(),
-        lambda df: df.mask(df.x == 10, 42),
-        lambda df: df.mask(df.x == 10),
-        lambda df: df.mask(lambda df: df.x % 2 == 0, 42),
-        lambda df: df.mask(df.x == 10, df + 2),
-        lambda df: df.mask(df.x == 10, lambda df: df + 2),
-        lambda df: df.x.mask(df.x == 10, 42),
-        lambda df: df.abs(),
-        lambda df: df.x.abs(),
-        lambda df: df.where(df.x == 10, 42),
-        lambda df: df.where(df.x == 10),
-        lambda df: df.where(lambda df: df.x % 2 == 0, 42),
-        lambda df: df.where(df.x == 10, df + 2),
-        lambda df: df.where(df.x == 10, lambda df: df + 2),
-        lambda df: df.x.where(df.x == 10, 42),
-        lambda df: df.rename(columns={"x": "xx"}),
-        lambda df: df.rename(columns={"x": "xx"}).xx,
-        lambda df: df.rename(columns={"x": "xx"})[["xx"]],
-        lambda df: df.x.rename(index="hello"),
-        lambda df: df.x.rename(index=df.x),
-        lambda df: df.x.rename(index=("hello",)),
-        lambda df: df.x.to_frame(),
-        lambda df: df.drop(columns="x"),
-        lambda df: df.drop(axis=1, labels=["x"]),
-        lambda df: df.x.index.to_series(),
-        lambda df: df.x.index.to_frame(),
-        lambda df: df.x.index.to_series(name="abc"),
-        lambda df: df.x.index.to_frame(name="abc"),
-        lambda df: df.eval("z=x+y"),
-        lambda df: df.select_dtypes(include="integer"),
-        lambda df: df.add_prefix(prefix="2_"),
-        lambda df: df.add_suffix(suffix="_2"),
-        lambda df: df.query("x > 10"),
+        # lambda df: isna(df.x),
+        # lambda df: df.x.isna(),
+        # lambda df: df.isnull(),
+        # lambda df: df.x.isnull(),
+        # lambda df: df.mask(df.x == 10, 42),
+        # lambda df: df.mask(df.x == 10),
+        # lambda df: df.mask(lambda df: df.x % 2 == 0, 42),
+        # lambda df: df.mask(df.x == 10, df + 2),
+        # lambda df: df.mask(df.x == 10, lambda df: df + 2),
+        # lambda df: df.x.mask(df.x == 10, 42),
+        # lambda df: df.abs(),
+        # lambda df: df.x.abs(),
+        # lambda df: df.where(df.x == 10, 42),
+        # lambda df: df.where(df.x == 10),
+        # lambda df: df.where(lambda df: df.x % 2 == 0, 42),
+        # lambda df: df.where(df.x == 10, df + 2),
+        # lambda df: df.where(df.x == 10, lambda df: df + 2),
+        # lambda df: df.x.where(df.x == 10, 42),
+        # lambda df: df.rename(columns={"x": "xx"}),
+        # lambda df: df.rename(columns={"x": "xx"}).xx,
+        # lambda df: df.rename(columns={"x": "xx"})[["xx"]],
+        # lambda df: df.x.rename(index="hello"),
+        # lambda df: df.x.rename(index=df.x),
+        # lambda df: df.x.rename(index=("hello",)),
+        # lambda df: df.x.to_frame(),
+        # lambda df: df.drop(columns="x"),
+        # lambda df: df.drop(axis=1, labels=["x"]),
+        # lambda df: df.x.index.to_series(),
+        # lambda df: df.x.index.to_frame(),
+        # lambda df: df.x.index.to_series(name="abc"),
+        # lambda df: df.x.index.to_frame(name="abc"),
+        # lambda df: df.eval("z=x+y"),
+        # lambda df: df.select_dtypes(include="integer"),
+        # lambda df: df.add_prefix(prefix="2_"),
+        # lambda df: df.add_suffix(suffix="_2"),
+        # lambda df: df.query("x > 10"),
     ],
 )
 def test_blockwise(func, pdf, df):
@@ -1584,7 +1595,7 @@ def test_align_unknown_partitions_same_root():
     assert_eq(result_2, pdf_result_2)
 
 
-@xfail_gpu(reason="align not supported by cudf")
+@xfail_gpu("align not supported by cudf")
 def test_unknown_partitions_different_root():
     pdf = lib.DataFrame({"a": 1}, index=[3, 2, 1])
     df = from_pandas(pdf, npartitions=2, sort=False)

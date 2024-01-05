@@ -47,7 +47,11 @@ class CumulativeBlockwise(Blockwise):
 
     @functools.cached_property
     def _args(self) -> list:
-        return self.operands[:-1]
+        return self.operands[:1]
+
+    @functools.cached_property
+    def _kwargs(self) -> dict:
+        return {"axis": self.axis, "skipna": self.skipna}
 
 
 class TakeLast(Blockwise):
@@ -58,7 +62,7 @@ class TakeLast(Blockwise):
     def operation(a, skipna=True):
         if skipna:
             a = a.bfill()
-        return a.tail(n=1).squeeze()
+        return a.tail(n=1).iloc[0]
 
 
 class CumulativeFinalize(Expr):

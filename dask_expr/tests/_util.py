@@ -20,6 +20,10 @@ def xfail_gpu(reason=None):
     return pytest.mark.xfail(condition, reason=reason)
 
 
+def xfail_param_gpu(value, reason=None):
+    return pytest.param(value, marks=xfail_gpu(reason))
+
+
 def assert_eq(a, b, *args, serialize_graph=True, **kwargs):
     if serialize_graph:
         # Check that no `Expr` instances are found in

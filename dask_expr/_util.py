@@ -11,7 +11,7 @@ import pandas as pd
 from dask import config
 from dask.base import normalize_token, tokenize
 from dask.dataframe._compat import is_string_dtype
-from dask.utils import get_default_shuffle_method
+from dask.utils import get_default_shuffle_method, get_meta_library
 from packaging.version import Version
 from pandas.api.types import is_datetime64_dtype, is_numeric_dtype
 
@@ -20,6 +20,13 @@ V = TypeVar("V")
 
 DASK_VERSION = Version(dask.__version__)
 DASK_GT_20231000 = DASK_VERSION > Version("2023.10.0")
+
+
+def _call_lib_attribute(attribute, data, *args, default_lib=pd, **kwargs):
+    try:
+        return getattr(get_meta_library(data), attribute)(data, *args, **kwargs)
+    except AttributeError:
+        return getattr(default_lib, attribute)(data, *args, **kwargs)
 
 
 def _calc_maybe_new_divisions(df, periods, freq):

@@ -220,10 +220,10 @@ def test_reductions(func, pdf, df):
 @pytest.mark.parametrize(
     "func",
     [
-        M.max,
-        M.min,
-        M.any,
-        M.all,
+        xfail_param_gpu(M.max, "cudf skipna support"),
+        xfail_param_gpu(M.min, "cudf skipna support"),
+        xfail_param_gpu(M.any, "cudf skipna support"),
+        xfail_param_gpu(M.all, "cudf RangeIndex.all support"),
         lambda idx: idx.size,
     ],
 )
@@ -698,6 +698,7 @@ def test_select_dtypes_projection(df):
     assert isinstance(result.expr.operand("columns"), list)
 
 
+@xfail_gpu("cudf.Series.rename does not support dict")
 def test_rename(pdf, df):
     q = df.x.rename({1: 2})
     assert q.divisions[0] is None
@@ -719,6 +720,7 @@ def test_rename(pdf, df):
         df.x.rename({0: 200}, sorted_index=True).divisions
 
 
+@xfail_gpu("cudf np.nan support")
 def test_isna(pdf):
     pdf.iloc[list(range(0, len(pdf), 2)), 0] = np.nan
     df = from_pandas(pdf, npartitions=10)
@@ -762,6 +764,7 @@ def test_to_datetime():
         to_datetime(1490195805)
 
 
+@xfail_gpu("https://github.com/rapidsai/cudf/issues/14717")
 def test_to_numeric(pdf, df):
     pdf.x = pdf.x.astype("str")
     expected = lib.to_numeric(pdf.x)
@@ -773,6 +776,7 @@ def test_to_numeric(pdf, df):
         to_numeric("1.0")
 
 
+@xfail_gpu("cudf timedelta support")
 def test_to_timedelta(pdf, df):
     expected = lib.to_timedelta(pdf.x)
     result = to_timedelta(df.x)

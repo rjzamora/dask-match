@@ -33,6 +33,7 @@ from tlz import merge_sorted, unique
 from dask_expr import _core as core
 from dask_expr._util import (
     _calc_maybe_new_divisions,
+    _call_lib_attribute,
     _convert_to_list,
     _tokenize_deterministic,
     _tokenize_partial,
@@ -70,8 +71,8 @@ class Expr(core.Expr):
         try:
             return object.__getattribute__(self, key)
         except AttributeError as err:
-            if key == "_meta":
-                # Avoid a recursive loop if/when `self._meta`
+            if key.startswith("_meta"):
+                # Avoid a recursive loop if/when `self._meta*`
                 # produces an `AttributeError`
                 raise RuntimeError(
                     f"Failed to generate metadata for {self}. "
@@ -1086,14 +1087,14 @@ class ToTimestamp(Elemwise):
 class ToNumeric(Elemwise):
     _parameters = ["frame", "errors", "downcast"]
     _defaults = {"errors": "raise", "downcast": None}
-    operation = staticmethod(pd.to_numeric)
+    operation = staticmethod(functools.partial(_call_lib_attribute, "to_numeric"))
 
 
 class ToDatetime(Elemwise):
     _parameters = ["frame", "kwargs"]
     _defaults = {"kwargs": None}
     _keyword_only = ["kwargs"]
-    operation = staticmethod(pd.to_datetime)
+    operation = staticmethod(functools.partial(_call_lib_attribute, "to_datetime"))
 
     @functools.cached_property
     def _kwargs(self):

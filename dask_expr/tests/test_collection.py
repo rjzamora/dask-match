@@ -951,8 +951,8 @@ def test_rename_columns():
 
     df.columns = ["x", "y"]
     pdf.columns = ["x", "y"]
-    lib.testing.assert_index_equal(df.columns, lib.Index(["x", "y"]))
-    lib.testing.assert_index_equal(df._meta.columns, lib.Index(["x", "y"]))
+    assert_eq(df.columns, lib.Index(["x", "y"]))
+    assert_eq(df._meta.columns, lib.Index(["x", "y"]))
 
 
 def test_columns_named_divisions_and_meta():
@@ -1258,6 +1258,7 @@ def test_size_optimized(df):
     assert out._name == expected._name
 
 
+@xfail_gpu("cudf udf support")
 def test_apply_infer_columns():
     df = lib.DataFrame({"x": [1, 2, 3, 4], "y": [10, 20, 30, 40]})
     ddf = from_pandas(df, npartitions=2)
@@ -1310,6 +1311,7 @@ def test_simple_graphs(df):
     assert graph[(expr._name, 0)] == (operator.add, (df.expr._name, 0), 1)
 
 
+@xfail_gpu("No string array in cupy")
 def test_values():
     from dask.array.utils import assert_eq
 

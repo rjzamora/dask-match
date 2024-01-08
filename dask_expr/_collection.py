@@ -676,7 +676,7 @@ class FrameBase(DaskMethodsMixin):
 
     @property
     def values(self):
-        return self.to_dask_array()
+        return self.to_dask_array(meta=self._meta.values)
 
     def sum(self, skipna=True, numeric_only=False, min_count=0, split_every=False):
         return new_collection(

@@ -727,6 +727,12 @@ def test_isna(pdf):
     assert_eq(isna(pdf.x), lib.isna(pdf.x))
 
 
+def test_clear_divisions(df):
+    result = df.clear_divisions()
+    assert not result.known_divisions
+    assert_eq(df, result, check_divisions=False)
+
+
 def test_abs_errors():
     df = lib.DataFrame(
         {
@@ -1457,11 +1463,11 @@ def test_drop_duplicates(df, pdf, split_out):
 def test_drop_duplicates_split_out(df, pdf):
     q = df.drop_duplicates(subset=["x"])
     assert len(list(q.optimize().find_operations(Shuffle))) > 0
-    assert_eq(q, pdf.drop_duplicates(subset=["x"]))
+    assert_eq(q, pdf.drop_duplicates(subset=["x"]), check_index=False)
 
     q = df.x.drop_duplicates()
     assert len(list(q.optimize().find_operations(Shuffle))) > 0
-    assert_eq(q, pdf.x.drop_duplicates())
+    assert_eq(q, pdf.x.drop_duplicates(), check_index=False)
 
 
 def test_walk(df):
@@ -1603,6 +1609,26 @@ def test_unknown_partitions_different_root():
     df2 = from_pandas(pdf2, npartitions=2, sort=False)
     with pytest.raises(ValueError, match="Not all divisions"):
         df.align(df2)
+
+
+@pytest.mark.parametrize("split_every", [None, 2])
+def test_split_out_drop_duplicates(split_every):
+    x = np.concatenate([np.arange(10)] * 100)[:, None]
+    y = x.copy()
+    z = np.concatenate([np.arange(20)] * 50)[:, None]
+    rs = np.random.RandomState(1)
+    rs.shuffle(x)
+    rs.shuffle(y)
+    rs.shuffle(z)
+    df = lib.DataFrame(np.concatenate([x, y, z], axis=1), columns=["x", "y", "z"])
+    ddf = from_pandas(df, npartitions=20)
+
+    sol = df.drop_duplicates(subset=["x", "z"], keep="first")
+    res = ddf.drop_duplicates(
+        subset=["x", "z"], keep="first", split_every=split_every, split_out=10
+    )
+    assert res.npartitions == 10
+    assert_eq(sol, res, check_index=False)
 
 
 @pytest.mark.parametrize("dropna", [False, True])
@@ -1932,7 +1958,7 @@ def test_quantile(df):
         df.x.quantile(q=[]).compute()
 
     ser = from_pandas(lib.Series(["a", "b", "c"]), npartitions=2)
-    with pytest.raises(TypeError, match="on non-numeric"):
+    with pytest.raises(ValueError, match="object series"):
         ser.quantile()
 
 

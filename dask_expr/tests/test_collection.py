@@ -1372,6 +1372,7 @@ def test_repartition_no_op(df):
     assert result._name == df._name
 
 
+@xfail_gpu("cudf memory usage is smaller")
 def test_repartition_partition_size(df):
     df2 = df.repartition(partition_size="0.25kb")
     assert df2.npartitions == 20

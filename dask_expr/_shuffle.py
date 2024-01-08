@@ -1118,7 +1118,8 @@ class _SetIndexPost(Blockwise):
 
     @staticmethod
     def operation(df, index_name, drop, set_name, column_dtype):
-        df = df.set_index(set_name, drop=drop).rename_axis(index=index_name)
+        df = df.set_index(set_name, drop=drop)
+        df.index.name = index_name
         df.columns = df.columns.astype(column_dtype)
         return df
 

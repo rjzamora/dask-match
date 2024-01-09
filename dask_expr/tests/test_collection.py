@@ -764,7 +764,6 @@ def test_to_datetime():
         to_datetime(1490195805)
 
 
-@xfail_gpu("https://github.com/rapidsai/cudf/issues/14717")
 def test_to_numeric(pdf, df):
     pdf.x = pdf.x.astype("str")
     expected = lib.to_numeric(pdf.x)
@@ -1638,6 +1637,7 @@ def test_split_out_drop_duplicates(split_every):
     assert_eq(sol, res, check_index=False)
 
 
+@xfail_gpu("cudf axis support")
 @pytest.mark.parametrize("dropna", [False, True])
 def test_nunique(pdf, dropna):
     pdf["z"] = pdf.y.astype(float)
@@ -1885,6 +1885,7 @@ def test_size(df, pdf):
     assert_eq(df.size, pdf.size)
 
 
+@xfail_gpu("cudf observed keyword")
 def test_drop_duplicates_groupby(pdf):
     pdf["z"] = 1
     df = from_pandas(pdf, npartitions=10)
@@ -1928,6 +1929,7 @@ def test_replace_filtered_combine_similar():
     assert all(isinstance(op.frame, Filter) for op in similar)
 
 
+@xfail_gpu("cudf quantile returns DataFrame")
 def test_quantile_frame(df, pdf):
     assert_eq(df.quantile(), lib.Series([49.0, 7.0], index=["x", "y"], name=0.5))
     assert df.quantile().divisions == ("x", "y")
@@ -1949,6 +1951,7 @@ def test_quantile_frame(df, pdf):
     )
 
 
+@xfail_gpu("cudf quantile returns DataFrame")
 def test_quantile(df):
     assert_eq(df.x.quantile(), 49.0)
     assert_eq(df.x.quantile(method="dask"), 49.0)
@@ -1969,6 +1972,7 @@ def test_quantile(df):
         ser.quantile()
 
 
+@xfail_gpu("cudf align support")
 @pytest.mark.parametrize("join", ["inner", "outer", "left", "right"])
 def test_align_axis(join):
     df1a = lib.DataFrame(
@@ -2011,12 +2015,15 @@ def test_align_axis(join):
         ddf1a["A"].align(ddf1b["B"], join=join, axis=1)
 
 
+@xfail_gpu("cudf align support")
 def test_quantile_datetime_numeric_only_false():
+    import pandas as pd
+
     df = lib.DataFrame(
         {
             "int": [1, 2, 3, 4, 5, 6, 7, 8],
-            "dt": [lib.NaT] + [datetime(2011, i, 1) for i in range(1, 8)],
-            "timedelta": lib.to_timedelta([1, 2, 3, 4, 5, 6, 7, np.nan]),
+            "dt": [pd.NaT] + [datetime(2011, i, 1) for i in range(1, 8)],
+            "timedelta": pd.to_timedelta([1, 2, 3, 4, 5, 6, 7, np.nan]),
         }
     )
     ddf = from_pandas(df, 1)
@@ -2058,6 +2065,7 @@ def test_keys(df, pdf):
     assert_eq(df.x.keys(), pdf.x.keys())  # Alias for Series.index
 
 
+@xfail_gpu("cudf freqency support")
 @pytest.mark.parametrize("data_freq, divs1", [("B", False), ("D", True), ("h", True)])
 def test_shift_with_freq_datetime(pdf, data_freq, divs1):
     pdf.index = lib.date_range(start="2020-01-01", periods=len(pdf), freq=data_freq)
@@ -2073,6 +2081,7 @@ def test_shift_with_freq_datetime(pdf, data_freq, divs1):
     assert res.known_divisions == divs1
 
 
+@xfail_gpu("cudf period_range support")
 @pytest.mark.parametrize("data_freq,divs", [("D", True), ("h", True)])
 def test_shift_with_freq_period_index(pdf, data_freq, divs):
     pdf.index = lib.period_range(start="2020-01-01", periods=len(pdf), freq=data_freq)
@@ -2089,6 +2098,7 @@ def test_shift_with_freq_period_index(pdf, data_freq, divs):
         df.index.shift(2, freq="D")
 
 
+@xfail_gpu("cudf timedelta support")
 @pytest.mark.parametrize("data_freq", ["min", "D", "h"])
 def test_shift_with_freq_TimedeltaIndex(pdf, data_freq):
     pdf.index = lib.timedelta_range("1 day", periods=len(pdf), freq=data_freq)

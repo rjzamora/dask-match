@@ -5,7 +5,7 @@ from dask_expr import from_pandas
 from dask_expr.tests._util import _backend_library, assert_eq
 
 # Set DataFrame backend for this module
-lib = _backend_library()
+lib = _backend_library(skip_gpu=True)
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@ import pytest
 from dask_expr._collection import from_pandas
 from dask_expr.tests._util import _backend_library, assert_eq
 
-lib = _backend_library()
+lib = _backend_library(skip_gpu=True)
 
 
 @pytest.fixture()

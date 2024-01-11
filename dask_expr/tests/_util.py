@@ -10,7 +10,10 @@ def _backend_name() -> str:
     return config.get("dataframe.backend", "pandas")
 
 
-def _backend_library():
+def _backend_library(skip_gpu=False):
+    backend_name = _backend_name()
+    if skip_gpu and backend_name == "cudf":
+        pytest.skip(allow_module_level=True)
     return importlib.import_module(_backend_name())
 
 

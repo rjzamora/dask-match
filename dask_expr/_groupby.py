@@ -1042,13 +1042,13 @@ class GroupBy:
 
         self.obj = obj[projection] if projection is not None else obj
         self.sort = sort
-        self.observed = observed #if observed is not None else False
+        self.observed = observed  # if observed is not None else False
         self.dropna = dropna
         self.group_keys = group_keys
         self.by = [by] if np.isscalar(by) or isinstance(by, Expr) else list(by)
         # surface pandas errors
         self._meta = self.obj._meta.groupby(
-            by,
+            by._meta if isinstance(by, Expr) else by,
             group_keys=group_keys,
             sort=sort,
             **_as_dict("observed", observed),

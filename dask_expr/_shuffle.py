@@ -4,6 +4,7 @@ import functools
 import math
 import operator
 import uuid
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -223,6 +224,7 @@ class Shuffle(ShuffleBase):
             return SimpleShuffle(frame, *ops)
         elif method == "tasks":
             return TaskShuffle(frame, *ops)
+            #return ChunkedShuffle(frame, *ops)
         else:
             raise ValueError(f"{method} not supported")
 
@@ -429,6 +431,153 @@ class TaskShuffle(SimpleShuffle):
                     _concat_list,
                     self.ignore_index,
                 )
+
+                for _, _idx, _inp in _concat_list:
+                    dsk[(split_name, _idx, _inp)] = (
+                        operator.getitem,
+                        (shuffle_group_name, _inp),
+                        _idx,
+                    )
+
+                    if (shuffle_group_name, _inp) not in dsk:
+                        # Initial partitions (output of previous stage)
+                        _part = inp_part_map[_inp]
+                        if stage == 0:
+                            if _part < npartitions_input:
+                                input_key = (name_input, _part)
+                            else:
+                                # In order to make sure that to_serialize() serialize the
+                                # empty dataframe input, we add it as a key.
+                                input_key = (shuffle_group_name, _inp, "empty")
+                                dsk[input_key] = meta_input
+                        else:
+                            input_key = (name_input, _part)
+
+                        # Convert partition into dict of dataframe pieces
+                        dsk[(shuffle_group_name, _inp)] = (
+                            self._shuffle_group,
+                            input_key,
+                            _filter,
+                            self.partitioning_index,
+                            stage,
+                            nsplits,
+                            npartitions_input,
+                            self.ignore_index,
+                            npartitions,
+                        )
+
+        if npartitions != npartitions_input:
+            repartition_group_name = "repartition-group-" + name
+
+            dsk2 = {
+                (repartition_group_name, i): (
+                    shuffle_group_2,
+                    (name, i),
+                    self.partitioning_index,
+                    self.ignore_index,
+                    npartitions,
+                )
+                for i in range(npartitions_input)
+            }
+
+            for i, p in enumerate(self._partitions):
+                dsk2[(self._name, i)] = (
+                    shuffle_group_get,
+                    (repartition_group_name, p % npartitions_input),
+                    p,
+                )
+
+            dsk.update(dsk2)
+        return dsk
+
+
+class ChunkedShuffle(TaskShuffle):
+
+    @staticmethod
+    def _shuffle_group(dfs, _filter, *args):
+        """Filter the output of `shuffle_group`"""
+        if not isinstance(dfs, list):
+            dfs = [dfs]
+
+        if len(dfs) == 1 and _filter is None:
+            return shuffle_group(dfs[0], *args)
+
+        result = defaultdict(list)
+        for df in dfs:
+            for k, v in shuffle_group(df, *args).items():
+                if _filter is None or k in _filter:
+                    result[k].append(v)
+
+        for k in list(result.keys()):
+            result[k] = _concat(result[k], False)
+        return result
+
+    def _layer(self):
+        max_branch = (self.options or {}).get("max_branch", None) or 32
+        npartitions_input = self.frame.npartitions
+        if len(self._partitions) <= max_branch or npartitions_input <= max_branch:
+            # We are creating a small number of output partitions,
+            # or starting with a small number of input partitions.
+            # No need for staged shuffling. Staged shuffling will
+            # sometimes require extra work/communication in this case.
+            return super()._layer()
+
+        # Calculate number of stages and splits per stage
+        npartitions = self.npartitions_out
+        stages = int(math.ceil(math.log(npartitions_input) / math.log(max_branch)))
+        if stages > 1:
+            nsplits = int(math.ceil(npartitions_input ** (1 / stages)))
+        else:
+            nsplits = npartitions_input
+
+        # Construct global data-movement plan
+        inputs = [
+            tuple(digit(i, j, nsplits) for j in range(stages))
+            for i in range(nsplits**stages)
+        ]
+        inp_part_map = {inp: i for i, inp in enumerate(inputs)}
+        parts_out = range(len(inputs))
+
+        # Build graph
+        dsk = {}
+        name = self.frame._name
+        meta_input = make_meta(self.frame._meta)
+        for stage in range(stages):
+            # Define names
+            name_input = name
+            if stage == (stages - 1) and npartitions == npartitions_input:
+                name = self._name
+                parts_out = self._partitions
+                _filter = parts_out if self._filtered else None
+            else:
+                name = f"stage-{stage}-{self._name}"
+                _filter = None
+
+            shuffle_group_name = "group-" + name
+            split_name = "split-" + name
+
+            for global_part, part in enumerate(parts_out):
+                out = inputs[part]
+
+                _concat_list = []  # get_item tasks to concat for this output partition
+                for i in range(nsplits):
+                    # Get out each individual dataframe piece from the dicts
+                    _inp = insert(out, stage, i)
+                    _idx = out[stage]
+                    _concat_list.append((split_name, _idx, _inp))
+
+                # concatenate those pieces together, with their friends
+                if name == self._name:
+                    # Final stage, must concatenate
+                    dsk[(name, global_part)] = (
+                        _concat,
+                        _concat_list,
+                        self.ignore_index,
+                    )
+                else:
+                    # Don't concatenate!
+                    dsk[(name, global_part)] = (lambda x: x, _concat_list)
+
 
                 for _, _idx, _inp in _concat_list:
                     dsk[(split_name, _idx, _inp)] = (
